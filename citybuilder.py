@@ -3,21 +3,82 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.colors as colors
 import random
-import math
+from collections import namedtuple
+from typing import List
+import traceback
+
+class Parameters:
+	def __init__(self):
+		self.verticalBlocks=2
+		self.horizontalBlocks=2
+		self.numberCarsPerBlock=10
+		self.numberStations=1
+		self.numberChargingPerStation=10
+		self.carMovesFullDeposity=1000
+		self.carRechargePerTic=100
+		self.opmitimizeCSSearch=10 # bigger is more slow
+
+		self.viewDrawCity=False
+
+
+class ChargingStation:
+	def __init__(self,grid,coordinates ,numberCharging):
+		self.grid=grid
+		cell=self.grid.grid[coordinates[0],coordinates[1]]
+		self.cell=cell
+		cell.cs=self
+		self.numberCharging=numberCharging
+		self.queue=[]
+		self.car=[None for i in range(numberCharging)]
+		self.t=[0 for i in range(numberCharging)]
+
+		self.insertInRouteMap(cell)
+	
+	def move(self):
+		pass
+
+	def insertInRouteMap(self, cell):
+		visited = []
+		distance = 0
+		current_level = [cell]
+
+		while current_level:
+			next_level = []
+
+			for current_cell in current_level:
+				visited.append(current_cell)
+
+				if len(current_cell.destination) > 1:
+					current_cell.h2cs.append(HeuristicToCS(self, distance))
+
+				# Añadir los orígenes a la lista del siguiente nivel
+				for origin in current_cell.origin:
+					if origin not in visited:
+						next_level.append(origin)
+
+			# Incrementar la distancia y mover al siguiente nivel
+			distance += 1
+			current_level = next_level
+
+class HeuristicToCS:
+	def __init__(self,cs:ChargingStation,distance:int):
+		self.cs=cs
+		self.distance=distance
 
 class Cell:    
 	ONE=1
 	TWO=2
-	THREE=3
 	FREE = 0
 
 	def __init__(self, initial_state):
+		self.h2cs : List[*HeuristicToCS]=[]
 		self.state = initial_state
 		self.next_state = None
 		self.neighbors = [[0,0,0],[0,0,0],[0,0,0]]
 		self.origin=[]
 		self.destination=[]
 		self.car=None
+		self.cs=None
 		self.velocity=0
 		self.x=-1
 		self.y=-1
@@ -46,20 +107,18 @@ class Cell:
 		self.state = self.next_state
 	
 	def updateColor(self):
-		count=len(self.origin)+len(self.destination)
+		count=len(self.destination)
 		if count==0:
 			self.state=Cell.FREE
 		elif count==1:
 			self.state=Cell.ONE
 		elif count==2:
 			self.state=Cell.TWO
-		elif count==3:
-			self.state=Cell.THREE
 
 	def update(self,t): 
 		# when it is an intersection
 		stop=False
-		for origin in reversed(self.origin):
+		for origin in self.origin: # reversed(self.origin):
 			if not stop:
 				if origin.car is None:
 					continue
@@ -67,43 +126,45 @@ class Cell:
 			else:
 				origin.t=t+1
 
+	def color(self,city):
+		cell=self
+		r=len(cell.destination)#+len(cell.origin)
+		if cell.state==Cell.FREE:
+			return 0
+		else:
+			if r==0:
+				r=3
+		
+		if cell.t==city.t+1:
+			r=3
+		if cell.car!=None:
+			r=5
+		if cell.cs!=None:
+			r=4
+		return r
+
+# Definiendo una namedtuple llamada 'Punto'
+Street = namedtuple('Street', ['path', 'velicity','lames'])
+
 class Block:
+
 	def __init__(self):
 		r = 1
-		self.lanes = [
-			# [ (-1,3), (3,3), (3,-1) ], #rojo
-			[ (r+1,3), (r+1,-1)],
-			[ (r,3), (r,-1)],
-			[(-1,r+1),(3,r+1)],
-			[(-1,r),(3,r)],
+		self.lanes=[]
+		self.velocities=[]
+		self.sugar(
+			Street([ (-1,3), (3,3), (3,-1) ], 1,1), # Rotonda
+			#Street([(r,3), (r,-1)],1,2), # Cruce
+			#Street([(-1,r),(3,r)],1,2),
 
+			Street([(r,47),(r,3)],2,2), # Avenidas
+			Street([(3,r),(47,r)],2,2), 
 
-			[ (r+1,47), (r+1,3) ], #azul
-			[ (r,47), (r,3) ], #azul
-
-			[ (3,r+1), (47,r+1) ], #azul
-			[ (3,r), (47,r) ], #azul
-
-			[ (47,15), (r+1,15) ], #amarillo
-			[ (r+1,36), (47,36) ], #amarillo			
-			[ (15,r+1), (15,47) ], #amarillo
-			[ (36,47), (36,r+1), ], #amarillo
-		]
-		self.velocities = [
-			1,
-			1,
-			1,
-
-			1,
-			2,
-			2,
-			2,
-			2,
-			1,
-			1,
-			1,
-			1,
-		]
+			Street([(47,15),(r+1,15)],1,1), # Calles
+			Street([(r+1,36), (47,36) ],1,1),			
+			Street([ (15,r+1), (15,47) ],1,1),
+			Street([ (36,47), (36,r+1), ],1,1),
+		)
 
 		max_width = 0
 		max_height = 0
@@ -115,6 +176,52 @@ class Block:
 					max_height = point[1]
 		self.width = (max_width+1)*2
 		self.height = (max_height+1)*2
+
+	def pathPlusLame(self,path,lame):
+		name=["" for i in range(len(path))]
+		for i in range(len(path)-1):
+			source=path[i]
+			target=path[i+1]
+			if source[1]==target[1]: #vertical
+				if source[0]<target[0]: #up
+					key="u"
+				else: #down
+					key="d"
+			else: #horizontal
+				if source[1]<target[1]: #right
+					key="r"
+				else: #left
+					key="l"
+			name[i]+=key
+			name[i+1]+=key
+			
+		
+		switch={				
+			"u":(0,1),
+			"d":(0,-1),
+			"r":(-1,0),
+			"l":(1,0),
+			"ur":(-1,1),
+			"ul":(1,1),
+			"dr":(1,1),
+			"dl":(-1,1),
+			"ru":(-1,1),
+			"rd":(-1,-1),
+			"lu":(1,1),
+			"ld":(1,-1),
+		}
+
+		newPath=[]
+		for i,p in enumerate(path):
+			delta=switch[name[i]]
+			newPath.append((p[0]+delta[0]*lame,p[1]+delta[1]*lame))
+		return newPath
+
+	def sugar(self,*streets):
+		for street in streets:
+			for lame in range(street.lames):
+				self.lanes.append(self.pathPlusLame(street.path,lame))
+				self.velocities.append(street.velicity)
 
 	def draw2(self,grid,lastx,lasty,xx,yy,velocity):
 		if lastx is None:
@@ -140,6 +247,7 @@ class Block:
 				grid.link(last,current,velocity)
 				last=current
 				yield
+
 	def draw(self,grid,x,y):
 		for i,lane in enumerate(self.lanes):
 			lastx=None
@@ -184,56 +292,138 @@ class Block:
 				lasty=yy
 		
 class City:
-	def __init__(self,verticalBlocks,horizontalBlocks, block):
-		self.verticalBlocks = verticalBlocks
-		self.horizontalBlocks = horizontalBlocks
+	def __init__(self,p, block):
+		self.p=p
 		self.block=block
-		self.grid=Grid(verticalBlocks*block.height,horizontalBlocks*block.width)
+		self.grid=Grid(p.verticalBlocks*block.height,p.horizontalBlocks*block.width)
 		self.t=0
 
+		city = self
+		self.city_generator = city.generator()
+		g=city.grid
+		#g=Grid(100,100)
+
+		# Animation
+		next(self.city_generator)
+		next(self.city_generator)
+
+		fig, ax = plt.subplots()
+
+		bounds = [0, 1, 2, 3, 4, 5, 6]
+		cmap = colors.ListedColormap(['black',  'green', 'blue','red', 'yellow', 'white'])
+		norm = colors.BoundaryNorm(bounds, cmap.N)
+
+		def extract_color(cell_obj):
+			return cell_obj.color(self)
+
+		img = ax.imshow(np.vectorize(extract_color)(g.grid), interpolation='nearest', cmap=cmap, norm=norm)
+		ani = animation.FuncAnimation(fig, self.update, fargs=(img, g.grid, g.heigh,g.width, ), frames=50,interval=1)
+		plt.show()
+	
+	def update(self,frameNum, img, grid, heigh, width):
+		try:
+			#for i in range(100):
+			next(self.city_generator)
+		except StopIteration:
+			pass
+		except Exception as e:
+			print(e)
+			pass
+
+		# for i in range(heigh):
+		#     for j in range(width):
+		#         grid[i, j].set_next_state()
+
+		newGrid = np.empty((heigh, width))
+		for i in range(heigh):
+			for j in range(width):
+				#grid[i, j].update_state()
+				newGrid[i, j] = grid[i, j].color(self)
+				# if newGrid[i, j] == Cell.STREET:
+				# 	print(i,j)
+				
+		# initial_states = np.random.choice([Cell.STREET, Cell.FREE], grid.shape[0]*grid.shape[1] , p=[0.2, 0.8])
+		# newGrid = np.array([state for state in initial_states]).reshape(grid.shape[0], grid.shape[1])
+		img.set_data(newGrid)
+		return img,
+
+
 	def generator(self):
-		yieldCada=1000
-		yieldI=0
-		for i in range(self.verticalBlocks):
-			for j in range(self.horizontalBlocks):
-				for _ in self.block.draw(self.grid,i*self.block.height+self.block.height//2,j*self.block.width+self.block.width//2):
-					if yieldCada<=yieldI:
-						yieldI=0
-						yield
-					yieldI+=1
-		
-		self.cars=[]
-		for cars in range(500*self.verticalBlocks*self.horizontalBlocks): # number of cars
-			self.cars.append(Car(self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
-			if yieldCada<=yieldI:
-				yieldI=0
-				yield
-			yieldI+=1
+		try:
+			# Build city streets
+			yieldCada=1000
+			if self.p.viewDrawCity:
+				yieldCada=1
+			yieldI=0
+			for i in range(self.p.verticalBlocks):
+				for j in range(self.p.horizontalBlocks):
+					for _ in self.block.draw(self.grid,i*self.block.height+self.block.height//2,j*self.block.width+self.block.width//2):
+						if yieldCada<=yieldI:
+							yieldI=0
+							yield
+						yieldI+=1
 
-		while True:
-			self.t+=1
-			moreMove=self.cars
-			noMove=[]
+			numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
+			numberCarsPerBlock=p.numberCarsPerBlock
+			numberStations=p.numberStations
+			numberChargingPerStation=p.numberChargingPerStation
+
+
+
+			# Put cs (Charge Stations)
+			self.cs=[]
+			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
+				self.cs.append(ChargingStation(self.grid,self.grid.randomStreet(),numberChargingPerStation))
+				if yieldCada<=yieldI:
+					yieldI=0
+					yield
+				yieldI+=1
+
+
+			# Orden and filter cs by p.opmitimizeCSSearch
+			for cell in self.grid.grid.flatten():
+				if 0<len(cell.h2cs):
+					cell.h2cs.sort(key=lambda x: x.distance)
+					cell.h2cs=cell.h2cs[:self.p.opmitimizeCSSearch]
+
+			# Put cars
+			self.cars=[]
+			for _ in range(numberCarsPerBlock*numberBlocks): # number of cars
+				self.cars.append(Car(self.p,self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
+				if yieldCada<=yieldI:
+					yieldI=0
+					yield
+				yieldI+=1
+
+			# Simulation
 			while True:
-				moreMove2=[]
-				for car in moreMove:
-					move=car.move(self.t)
-					if move:
-						moreMove2.append(car)
-					else:
-						noMove.append(car)
-				if len(moreMove2)==0:
-					break
-				moreMove=moreMove2
+				self.t+=1
+				moreMove=self.cars
+				noMove=[]
+				while True:
+					moreMove2=[]
+					for car in moreMove:
+						move=car.move(self.t)
+						if move:
+							moreMove2.append(car)
+						else:
+							noMove.append(car)
+					if len(moreMove2)==0:
+						break
+					moreMove=moreMove2
+				for inter in self.grid.intersections:
+					inter.update(self.t)
 
-			yieldCada=1
-			self.cars=noMove
-			for inter in self.grid.intersections:
-				inter.update(self.t)
-			if yieldCada<=yieldI:
-				yieldI=0
-				yield
-			yieldI+=1
+				self.cars=noMove
+
+				yieldCada=1
+				if yieldCada<=yieldI:
+					yieldI=0
+					yield
+				yieldI+=1
+
+		except Exception as e:  # Esto captura cualquier excepción derivada de la clase base Exception
+			print(traceback.format_exc())  # Esto imprime la traza completa del error
 
 class Grid:
 	def __init__(self, heigh, width):
@@ -278,23 +468,41 @@ class Grid:
 				self.intersections.append(target)
 
 class Car:
-	def __init__(self, grid, xy,targetxy):
+	def __init__(self,p : Parameters, grid: Grid, xy,targetCoordiantes:tuple):
+		self.p=p
 		self.grid = grid
 		self.x = xy[0]
 		self.y = xy[1]
-		self.targetx=targetxy[0]
-		self.targety=targetxy[1]
+
+		self.target=self.grid.grid[targetCoordiantes[0],targetCoordiantes[1]]
 		self.grid.grid[self.y, self.x].car = self
 		self.queda=0
+		# Change V2 to V3. Why use normal? A normal is a sum of uniform distributions. The normal is not limited to [0,1] but the uniform is. The normal by intervals.
+		self.moves=p.carMovesFullDeposity*random.random() 
+
+		# initial moves must be enough to reach the CS at least
+		dis,_=self.localizeCS(self.grid.grid[self.y,self.x])	
+		if self.moves<dis:
+			self.moves=dis
 
 	def inTarget(self):
-		return self.x == self.targetx and self.y == self.targety
-
+		return self.grid.grid[self.y,self.x]==self.target
+	
+	def localizeCS(self,cell:Cell,distance=0):
+		if cell.cs!=None:
+			return (0,cell.cs)
+		if len(cell.h2cs)==0:
+			if len(cell.destination)==1:
+				return self.localizeCS(cell.destination[0],distance+1)
+			else:
+				print("Error: in data structure of CS")
+		aux=cell.h2cs[0]
+		return (distance+aux.distance,aux.cs)
+	
 	def move(self,t):
 		if self.inTarget():
 			(y,x)=self.grid.randomStreet()
-			self.targetx=x
-			self.targety=y
+			self.target=self.grid.grid[y,x]
 		
 		cell=self.grid.grid[self.y,self.x]
 		if t!=cell.t:
@@ -309,8 +517,18 @@ class Car:
 			cell.car = None
 			toCell.car = self
 			toCell.t=t
+			self.moves-=1
 		else:
-			ire=self.aStart(cell)
+			dis,ire=self.aStart(cell,self.target)
+			dis2,_=self.localizeCS(ire)
+			if self.moves<dis+dis2:
+				# There are not enough moves, need to recharge in CS first
+				dis3,cs=self.localizeCS(cell)
+				if self.moves<dis3:
+					# There are not enough moves, event with recharge in CS
+					#return False
+					pass
+				ire=cs.cell
 			if ire.t==t or ire.car!=None:
 				return False
 			self.x = ire.x
@@ -318,13 +536,14 @@ class Car:
 			cell.car = None
 			ire.car = self
 			ire.t=t
+			self.moves-=1
 	
 		self.queda-=1
 		if self.queda==0:
 			return False
 		return True
 
-	def aStart(self,cell):
+	def aStart(self,cell:Cell,target:Cell):
 		# only mark visited if it has more than one destination
 		visited=set()
 		visited.add(cell)
@@ -332,11 +551,12 @@ class Car:
 		for d in cell.destination:
 			opened[d]=d
 		opened2={}
+		distancia=1
 		while True:
 			# solo se añaden los visited con mas de uno
 			for (o,r) in opened.items():
-				if o.x==self.targetx and o.y==self.targety:
-					return opened[o]
+				if o==target:
+					return (distancia,opened[o])
 				if len(o.destination)==1:
 					opened2[o.destination[0]]=r
 				else:
@@ -346,62 +566,7 @@ class Car:
 							opened2[d]=r
 			opened=opened2
 			opened2={}
+			distancia+=1
 
-	
-city=City(1,1,Block())
-city_generator = city.generator()
-g=city.grid
-#g=Grid(100,100)
-
-def update(frameNum, img, grid, heigh, width):
-	try:
-		#for i in range(100):
-		next(city_generator)
-	except StopIteration:
-		pass
-	except Exception as e:
-		print(e)
-		pass
-
-	# for i in range(heigh):
-	#     for j in range(width):
-	#         grid[i, j].set_next_state()
-
-	newGrid = np.empty((heigh, width))
-	for i in range(heigh):
-		for j in range(width):
-			#grid[i, j].update_state()
-			newGrid[i, j] = cell2color(grid[i, j])
-			# if newGrid[i, j] == Cell.STREET:
-			# 	print(i,j)
-			
-	# initial_states = np.random.choice([Cell.STREET, Cell.FREE], grid.shape[0]*grid.shape[1] , p=[0.2, 0.8])
-	# newGrid = np.array([state for state in initial_states]).reshape(grid.shape[0], grid.shape[1])
-	img.set_data(newGrid)
-	return img,
-
-# Animation
-next(city_generator)
-next(city_generator)
-
-fig, ax = plt.subplots()
-
-bounds = [0, 1, 2, 3, 4, 5]
-cmap = colors.ListedColormap(['black', 'red', 'green', 'blue', 'yellow', 'white'])
-norm = colors.BoundaryNorm(bounds, cmap.N)
-
-def cell2color(cell):
-	if cell.state==Cell.FREE:
-		return 0
-	r=len(cell.destination)+1#+len(cell.origin)
-	if r>4:
-		print("debug")
-	if cell.t==city.t+1:
-		r=1
-	if cell.car!=None:
-		r=4
-	return r
-
-img = ax.imshow(np.vectorize(cell2color)(g.grid), interpolation='nearest', cmap=cmap, norm=norm)
-ani = animation.FuncAnimation(fig, update, fargs=(img, g.grid, g.heigh,g.width, ), frames=50,interval=1)
-plt.show()
+p=Parameters()
+City(p,Block())
