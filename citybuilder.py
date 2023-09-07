@@ -20,7 +20,6 @@ class Parameters:
 
 		self.viewDrawCity=False
 
-
 class ChargingStation:
 	def __init__(self,grid,coordinates ,numberCharging):
 		self.grid=grid
@@ -107,10 +106,10 @@ class Cell:
 		self.state = self.next_state
 	
 	def updateColor(self):
-		count=len(self.destination)
+		count=len(self.origin+self.destination)
 		if count==0:
 			self.state=Cell.FREE
-		elif count==1:
+		elif count==1 or count==2:
 			self.state=Cell.ONE
 		elif count==2:
 			self.state=Cell.TWO
@@ -128,12 +127,16 @@ class Cell:
 
 	def color(self,city):
 		cell=self
-		r=len(cell.destination)#+len(cell.origin)
+		
 		if cell.state==Cell.FREE:
 			return 0
 		else:
-			if r==0:
+			if len(cell.destination)==0 or len(cell.origin)==0:
 				r=3
+			elif len(cell.destination)==2:
+				r=2
+			else:
+				r=1
 		
 		if cell.t==city.t+1:
 			r=3
@@ -403,7 +406,7 @@ class City:
 				while True:
 					moreMove2=[]
 					for car in moreMove:
-						move=car.move(self.t)
+						move=car.moveCar(self.t)
 						if move:
 							moreMove2.append(car)
 						else:
@@ -475,6 +478,7 @@ class Car:
 		self.y = xy[1]
 
 		self.target=self.grid.grid[targetCoordiantes[0],targetCoordiantes[1]]
+		self.target2=None # if need to recharge
 		self.grid.grid[self.y, self.x].car = self
 		self.queda=0
 		# Change V2 to V3. Why use normal? A normal is a sum of uniform distributions. The normal is not limited to [0,1] but the uniform is. The normal by intervals.
@@ -485,8 +489,8 @@ class Car:
 		if self.moves<dis:
 			self.moves=dis
 
-	def inTarget(self):
-		return self.grid.grid[self.y,self.x]==self.target
+	def inTarget(self,target):
+		return self.grid.grid[self.y,self.x]==target
 	
 	def localizeCS(self,cell:Cell,distance=0):
 		if cell.cs!=None:
@@ -499,10 +503,14 @@ class Car:
 		aux=cell.h2cs[0]
 		return (distance+aux.distance,aux.cs)
 	
-	def move(self,t):
-		if self.inTarget():
+	def moveCar(self,t):
+		if self.inTarget(self.target):
 			(y,x)=self.grid.randomStreet()
 			self.target=self.grid.grid[y,x]
+		if self.inTarget(self.target2):
+			# enter on CS
+			self.target2.cs.queue.append(self)
+			self.target2.car=None
 		
 		cell=self.grid.grid[self.y,self.x]
 		if t!=cell.t:
@@ -529,6 +537,7 @@ class Car:
 					#return False
 					pass
 				ire=cs.cell
+				self.target2=cs.cell
 			if ire.t==t or ire.car!=None:
 				return False
 			self.x = ire.x
