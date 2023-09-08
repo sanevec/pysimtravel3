@@ -12,16 +12,17 @@ class Parameters:
 		self.verticalBlocks=2
 		self.horizontalBlocks=2
 		self.numberCarsPerBlock=10
-		self.numberStations=1
-		self.numberChargingPerStation=10
+		self.numberStations=4
+		self.numberChargingPerStation=1
 		self.carMovesFullDeposity=1000
-		self.carRechargePerTic=100
+		self.carRechargePerTic=10
 		self.opmitimizeCSSearch=10 # bigger is more slow
 
 		self.viewDrawCity=False
 
 class ChargingStation:
-	def __init__(self,grid,coordinates ,numberCharging):
+	def __init__(self,p,grid,coordinates ,numberCharging):
+		self.p=p
 		self.grid=grid
 		cell=self.grid.grid[coordinates[0],coordinates[1]]
 		self.cell=cell
@@ -29,12 +30,36 @@ class ChargingStation:
 		self.numberCharging=numberCharging
 		self.queue=[]
 		self.car=[None for i in range(numberCharging)]
-		self.t=[0 for i in range(numberCharging)]
 
 		self.insertInRouteMap(cell)
 	
-	def move(self):
-		pass
+	def moveCS(self):
+		if len(self.queue)==0:
+			return
+		# Spanish: Si hay un coche en la cola, y hay un hueco en la estación, entonces el coche entra en la estación
+		# English: If there is a car in the queue, and there is a gap in the station, then the car enters the station
+		while 0<len(self.queue) and None in self.car:
+			car=self.queue.pop(0)
+			i=self.car.index(None)
+			self.car[i]=car
+
+		# Spanish: Recarga los coches que están en el cargador
+		# English: Recharge the cars that are in the charger
+		candidateToLeave=-1
+		for i in range(self.numberCharging):
+			if self.car[i]!=None:
+				self.car[i].moves+=self.p.carRechargePerTic
+				#print("Recharge percent:",self.car[i].moves/self.p.carMovesFullDeposity*100,"%")
+				if self.car[i].moves>self.p.carMovesFullDeposity:
+					self.car[i].moves=self.p.carMovesFullDeposity
+					candidateToLeave=i
+		#candidateToLeave=-1
+		if 0<=candidateToLeave and self.cell.car==None:
+			car=self.car[candidateToLeave]
+			self.car[candidateToLeave]=None
+			car.charging=False
+			car.target2=None
+			self.cell.car=car
 
 	def insertInRouteMap(self, cell):
 		visited = []
@@ -376,7 +401,7 @@ class City:
 			# Put cs (Charge Stations)
 			self.cs=[]
 			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
-				self.cs.append(ChargingStation(self.grid,self.grid.randomStreet(),numberChargingPerStation))
+				self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
 				if yieldCada<=yieldI:
 					yieldI=0
 					yield
@@ -414,8 +439,11 @@ class City:
 					if len(moreMove2)==0:
 						break
 					moreMove=moreMove2
-				for inter in self.grid.intersections:
-					inter.update(self.t)
+					for inter in self.grid.intersections:
+						inter.update(self.t)
+
+				for cs in self.cs:
+					cs.moveCS()
 
 				self.cars=noMove
 
@@ -488,6 +516,7 @@ class Car:
 		dis,_=self.localizeCS(self.grid.grid[self.y,self.x])	
 		if self.moves<dis:
 			self.moves=dis
+		self.charging=False
 
 	def inTarget(self,target):
 		return self.grid.grid[self.y,self.x]==target
@@ -509,8 +538,12 @@ class Car:
 			self.target=self.grid.grid[y,x]
 		if self.inTarget(self.target2):
 			# enter on CS
-			self.target2.cs.queue.append(self)
-			self.target2.car=None
+			if not self.charging:
+				cs=self.target2.cs
+				self.target2.cs.queue.append(self)
+				self.target2.car=None
+				self.charging=True
+			return
 		
 		cell=self.grid.grid[self.y,self.x]
 		if t!=cell.t:
@@ -536,7 +569,7 @@ class Car:
 					# There are not enough moves, event with recharge in CS
 					#return False
 					pass
-				ire=cs.cell
+				ire=self.aStart(cell,cs.cell)[1]
 				self.target2=cs.cell
 			if ire.t==t or ire.car!=None:
 				return False
