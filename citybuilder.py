@@ -1,3 +1,4 @@
+from time import sleep
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -95,7 +96,7 @@ class Cell:
 	FREE = 0
 
 	def __init__(self, initial_state):
-		self.h2cs : List[*HeuristicToCS]=[]
+		self.h2cs =[]
 		self.state = initial_state
 		self.next_state = None
 		self.neighbors = [[0,0,0],[0,0,0],[0,0,0]]
@@ -321,6 +322,7 @@ class Block:
 		
 class City:
 	def __init__(self,p, block):
+		
 		self.p=p
 		self.block=block
 		self.grid=Grid(p.verticalBlocks*block.height,p.horizontalBlocks*block.width)
@@ -328,13 +330,14 @@ class City:
 
 		city = self
 		self.city_generator = city.generator()
-		g=city.grid
+		self.g=city.grid
 		#g=Grid(100,100)
 
 		# Animation
 		next(self.city_generator)
 		next(self.city_generator)
 
+	def plotCity(self):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
@@ -344,9 +347,12 @@ class City:
 		def extract_color(cell_obj):
 			return cell_obj.color(self)
 
-		img = ax.imshow(np.vectorize(extract_color)(g.grid), interpolation='nearest', cmap=cmap, norm=norm)
-		ani = animation.FuncAnimation(fig, self.update, fargs=(img, g.grid, g.heigh,g.width, ), frames=50,interval=1)
+		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
+		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
 		plt.show()
+
+		
+		
 	
 	def update(self,frameNum, img, grid, heigh, width):
 		try:
@@ -392,9 +398,9 @@ class City:
 						yieldI+=1
 
 			numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
-			numberCarsPerBlock=p.numberCarsPerBlock
-			numberStations=p.numberStations
-			numberChargingPerStation=p.numberChargingPerStation
+			numberCarsPerBlock=self.p.numberCarsPerBlock
+			numberStations=self.p.numberStations
+			numberChargingPerStation=self.p.numberChargingPerStation
 
 
 
@@ -610,5 +616,4 @@ class Car:
 			opened2={}
 			distancia+=1
 
-p=Parameters()
-City(p,Block())
+
