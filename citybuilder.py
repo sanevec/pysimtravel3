@@ -9,6 +9,20 @@ from typing import List
 import traceback
 
 class Parameters:
+	"""
+	Parameters of the simulation
+
+	Attributes:
+		verticalBlocks (int): Number of vertical blocks
+		horizontalBlocks (int): Number of horizontal blocks
+		numberCarsPerBlock (int): Number of cars per block
+		numberStations (int): Number of charging stations
+		numberChargingPerStation (int): Number of charging per station
+		carMovesFullDeposity (int): Number of moves when the car is full
+		carRechargePerTic (int): Number of moves that the car recharge per tic
+		opmitimizeCSSearch (int): Number of charging stations to store in bifurcation cell to optimize the search
+		viewDrawCity (bool): If true, draw the city
+	"""
 	def __init__(self):
 		self.verticalBlocks=2
 		self.horizontalBlocks=2
@@ -335,10 +349,10 @@ class City:
 		#g=Grid(100,100)
 
 		# Animation
-		next(self.city_generator)
-		next(self.city_generator)
-
-  def plotCity(self):
+		#next(self.city_generator)
+		#next(self.city_generator)
+		
+	def plotCity(self):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
@@ -351,7 +365,7 @@ class City:
 
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
-		plt.show()
+		plt.show(block=True	)
 
 		
 		
