@@ -1,3 +1,4 @@
+from time import sleep
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -321,6 +322,7 @@ class Block:
 		
 class City:
 	def __init__(self,p, block):
+		
 		self.p=p
 		self.block=block
 		self.grid=Grid(p.verticalBlocks*block.height,p.horizontalBlocks*block.width)
@@ -336,8 +338,7 @@ class City:
 		next(self.city_generator)
 		next(self.city_generator)
 
-	
-	def plotCity(self):
+  def plotCity(self):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
@@ -351,6 +352,9 @@ class City:
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
 		plt.show()
+
+		
+		
 	
 	def update(self,frameNum, img, grid, heigh, width):
 		try:
@@ -400,7 +404,7 @@ class City:
 			numberStations=self.p.numberStations
 			numberChargingPerStation=self.p.numberChargingPerStation
 
-			# Put cs (Charge Stations)
+      # Put cs (Charge Stations)
 			self.cs=[]
 			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
 				self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
