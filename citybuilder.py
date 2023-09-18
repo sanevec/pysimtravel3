@@ -36,6 +36,18 @@ class Parameters:
 		self.viewDrawCity=True
 
 class ChargingStation:
+	"""
+	Charging station is a cell that can charge cars. It has a queue of cars and a number of charging slots.
+	The chargins statation (CS) alson has a route map to all cells of the city. This route map is used to calculate the distance to the CS.
+
+	Attributes:
+		p (Parameters): Parameters of the simulation
+		grid (Grid): Grid of the city
+		cell (Cell): Cell of the grid where the CS is located
+		numberCharging (int): Number of charging slots
+		queue (List[Car]): Queue of cars
+		car (List[Car]): List of cars in the charging slots
+	"""
 	def __init__(self,p,grid,coordinates ,numberCharging):
 		self.p=p
 		self.grid=grid
@@ -100,11 +112,22 @@ class ChargingStation:
 			current_level = next_level
 
 class HeuristicToCS:
+	"""
+	Heuristic to Charging Station is a class that stores the distance to a CS in a bifurcation cell.
+	It is a first version of the route map. 
+	"""
 	def __init__(self,cs:ChargingStation,distance:int):
 		self.cs=cs
 		self.distance=distance
 
 class Cell:    
+	"""
+	Cell is a class that represents a cell of the grid. It can be a street, a bifurcation or free. 
+	It contains a maximun of a car and a CS. 
+	When it is a street, it has a velocity and a direct link to the nexts cells. 
+	The time (t) is used to ensure that the cars respect the security distance. It is like a snake game. 
+	Same t represents the tail of the snake.
+	"""
 	ONE=1
 	TWO=2
 	FREE = 0
@@ -188,8 +211,22 @@ class Cell:
 		return r
 
 Street = namedtuple('Street', ['path', 'velocity','lames'])
+Street.__doc__="""
+Street is used as sugar syntax to define a street.
+
+Attributes:
+	path (List[tuple]): List of points of the street
+	velocity (int): Velocity of the street
+	lames (int): Number of lames of the street
+"""
 
 class Block:
+	"""
+	Block is used as sugar syntax to define the streets. 
+	The direction of the streets is important because the cars can only move in the direction of the streets.
+	At same time you draw the block connet the cells of the grid.
+	The construction is a list of streets that is rotated 90 degrees to fill the mosaique of the block.
+	"""
 
 	def __init__(self):
 		r = 1
@@ -335,6 +372,11 @@ class Block:
 				lasty=yy
 		
 class City:
+	"""
+	City is a general holder of the simulation. It encapsules low level details of the graphics representation.
+	generators are used to draw the buildings of the city and the simulation. It uses the yield instruction.
+	Yield can stop the execution of the container function and can be used recursively.
+	"""
 	def __init__(self,p, block):
 		
 		self.p=p
@@ -477,6 +519,12 @@ class City:
 			print(traceback.format_exc())  # Esto imprime la traza completa del error
 
 class Grid:
+	"""
+	Grid is a class that represents the grid of the city. It is a matrix of cells.
+	It stores the intersections of the city to make a semaphore. 
+	Also coinains several utility functions to calculate the distance between two cells, to get a random street, and 
+	to link two cells.
+	"""
 	def __init__(self, heigh, width):
 		self.width = width
 		self.heigh = heigh
@@ -519,6 +567,12 @@ class Grid:
 				self.intersections.append(target)
 
 class Car:
+	"""
+	The car class represents a car of the simulation. The moveCar function is the main function. 
+	The car moves from one cell to another. Sometimes it is only one cell, but sometimes 
+	there are more than one cell (bifurcation). In this case, the car uses the A* algorithm to find the best path.
+	If the car has not enough moves to reach the target, it will try to reach the nearest CS to recharge.
+	"""
 	def __init__(self,p : Parameters, grid: Grid, xy,targetCoordiantes:tuple):
 		self.p=p
 		self.grid = grid
