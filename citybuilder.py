@@ -19,7 +19,7 @@ class Parameters:
 		self.carRechargePerTic=10
 		self.opmitimizeCSSearch=10 # bigger is more slow
 
-		self.viewDrawCity=False
+		self.viewDrawCity=True
 
 class ChargingStation:
 	def __init__(self,p,grid,coordinates ,numberCharging):
@@ -96,17 +96,18 @@ class Cell:
 	FREE = 0
 
 	def __init__(self, initial_state):
-		self.h2cs =[]
+		self.h2cs=[]
 		self.state = initial_state
 		self.next_state = None
 		self.neighbors = [[0,0,0],[0,0,0],[0,0,0]]
 		self.origin=[]
 		self.destination=[]
-		self.car=None
-		self.cs=None
 		self.velocity=0
 		self.x=-1
 		self.y=-1
+
+		self.car=None
+		self.cs=None
 		self.t=0
 
 	def add_neighbor(self, neighbor):
@@ -172,8 +173,7 @@ class Cell:
 			r=4
 		return r
 
-# Definiendo una namedtuple llamada 'Punto'
-Street = namedtuple('Street', ['path', 'velicity','lames'])
+Street = namedtuple('Street', ['path', 'velocity','lames'])
 
 class Block:
 
@@ -182,17 +182,17 @@ class Block:
 		self.lanes=[]
 		self.velocities=[]
 		self.sugar(
-			Street([ (-1,3), (3,3), (3,-1) ], 1,1), # Rotonda
+			Street([ (-1,3), (3,3), (3,-1) ], 1,2), # Rotonda
 			#Street([(r,3), (r,-1)],1,2), # Cruce
 			#Street([(-1,r),(3,r)],1,2),
 
 			Street([(r,47),(r,3)],2,2), # Avenidas
 			Street([(3,r),(47,r)],2,2), 
 
-			Street([(47,15),(r+1,15)],1,1), # Calles
-			Street([(r+1,36), (47,36) ],1,1),			
-			Street([ (15,r+1), (15,47) ],1,1),
-			Street([ (36,47), (36,r+1), ],1,1),
+			Street([(47,15),(r+1-1,15)],1,1), # Calles #incorporación
+			Street([(r+1-1,36), (47,36) ],1,1), #salida 			
+			Street([ (15,r+1-1), (15,47) ],1,1),
+			Street([ (36,47), (36,r+1-1), ],1,1),
 		)
 
 		max_width = 0
@@ -250,7 +250,7 @@ class Block:
 		for street in streets:
 			for lame in range(street.lames):
 				self.lanes.append(self.pathPlusLame(street.path,lame))
-				self.velocities.append(street.velicity)
+				self.velocities.append(street.velocity)
 
 	def draw2(self,grid,lastx,lasty,xx,yy,velocity):
 		if lastx is None:
@@ -326,6 +326,7 @@ class City:
 		self.p=p
 		self.block=block
 		self.grid=Grid(p.verticalBlocks*block.height,p.horizontalBlocks*block.width)
+
 		self.t=0
 
 		city = self
@@ -337,12 +338,13 @@ class City:
 		next(self.city_generator)
 		next(self.city_generator)
 
-	def plotCity(self):
+  def plotCity(self):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
 		cmap = colors.ListedColormap(['black',  'green', 'blue','red', 'yellow', 'white'])
 		norm = colors.BoundaryNorm(bounds, cmap.N)
+	
 
 		def extract_color(cell_obj):
 			return cell_obj.color(self)
@@ -402,9 +404,7 @@ class City:
 			numberStations=self.p.numberStations
 			numberChargingPerStation=self.p.numberChargingPerStation
 
-
-
-			# Put cs (Charge Stations)
+      # Put cs (Charge Stations)
 			self.cs=[]
 			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
 				self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
@@ -591,7 +591,8 @@ class Car:
 			return False
 		return True
 
-	def aStart(self,cell:Cell,target:Cell):
+	def aStartDistance(self,cell:Cell,target:Cell):
+		# Distance version
 		# only mark visited if it has more than one destination
 		visited=set()
 		visited.add(cell)
@@ -616,4 +617,35 @@ class Car:
 			opened2={}
 			distancia+=1
 
+	def aStartTime(self,cell:Cell,target:Cell):
+		# Time version
+		# only mark visited if it has more than one destination
+		visited={}
+		visited.add(cell)
+		opened={}
+		for d in cell.destination:
+			opened[d]=d
+		opened2={}
+		distancia=1
+		while True:
+			# solo se añaden los visited con mas de uno
+			for (o,r) in opened.items():
+				if o==target:
+					return (distancia,opened[o])
+				if len(o.destination)==1:
+					opened2[o.destination[0]]=r
+				else:
+					if o not in visited:
+						visited.add(o)
+						for d in o.destination:
+							opened2[d]=r
+			opened=opened2
+			opened2={}
+			distancia+=1
 
+class TimeNode:
+	pass
+
+p=Parameters()
+c=City(p,Block())
+c.plotCity()
