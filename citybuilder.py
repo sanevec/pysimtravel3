@@ -33,7 +33,7 @@ class Parameters:
 		self.carRechargePerTic=10
 		self.opmitimizeCSSearch=10 # bigger is more slow
 
-		self.viewDrawCity=True
+		self.viewDrawCity=False
 
 class ChargingStation:
 	"""
@@ -394,7 +394,18 @@ class City:
 		#next(self.city_generator)
 		#next(self.city_generator)
 		
-	def plotCity(self):
+	def shell(self):
+		while True:
+			shell=input("Simtravel3> ")
+			if shell=="plot":
+				self.plot()
+			else:
+				# split shell
+				shell2=shell.split(" ")
+				if self.p.__dict__.get(shell2[0])!=None:
+					setattr(self.p,shell2[0],int(shell2[1]))
+
+	def plot(self):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
@@ -407,10 +418,7 @@ class City:
 
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
-		plt.show(block=True	)
-
-		
-		
+		plt.show(block=False	)
 	
 	def update(self,frameNum, img, grid, heigh, width):
 		try:
@@ -658,6 +666,9 @@ class Car:
 		if self.queda==0:
 			return False
 		return True
+	
+	def aStart(self,cell:Cell,target:Cell):
+		return self.aStartDistance(cell,target)
 
 	def aStartDistance(self,cell:Cell,target:Cell):
 		# Distance version
@@ -669,6 +680,7 @@ class Car:
 			opened[d]=d
 		opened2={}
 		distancia=1
+
 		while True:
 			# solo se añaden los visited con mas de uno
 			for (o,r) in opened.items():
@@ -714,6 +726,9 @@ class Car:
 class TimeNode:
 	pass
 
-p=Parameters()
-c=City(p,Block())
-c.plotCity()
+if __name__ == '__main__':
+	p=Parameters()
+	block=Block()
+	city=City(p,block)
+	city.shell()
+	
