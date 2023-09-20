@@ -4,21 +4,35 @@ import matplotlib.animation as animation
 import matplotlib.colors as colors
 import random
 from collections import namedtuple
-from typing import List
 import traceback
+import math
 
 class Parameters:
 	def __init__(self):
 		self.verticalBlocks=2
 		self.horizontalBlocks=2
-		self.numberCarsPerBlock=10
-		self.numberStations=4
+		self.numberCars=1
+		self.numberStations=1
 		self.numberChargingPerStation=1
-		self.carMovesFullDeposity=1000
+		self.carMovesFullDeposity=10000
 		self.carRechargePerTic=10
 		self.opmitimizeCSSearch=10 # bigger is more slow
 
-		self.viewDrawCity=True
+		self.aStarMethod="Time" # Time or Distance
+
+		# when aStarMethod is Time
+		self.aStartDeep=5 # bigger is more slow, more precision
+		self.aStarRemainderWeight=2 # weight of lineal distance to target to time
+		self.aStarStepsPerCar=2000 # bigger is more slow, more precision
+
+		# interface parameters
+		self.viewDrawCity=False
+		self.viewAStart=True
+
+'''
+Spanish: La distancia y el consumo de combustibre en esta versión son iguales. Astar deberá adaptarse cuando se cambie esta simplificación.
+English: The distance and fuel consumption in this version are the same. Astar will have to adapt when this simplification is changed.
+'''
 
 class ChargingStation:
 	def __init__(self,p,grid,coordinates ,numberCharging):
@@ -90,6 +104,7 @@ class HeuristicToCS:
 		self.distance=distance
 
 class Cell:    
+	# factorizable
 	ONE=1
 	TWO=2
 	FREE = 0
@@ -98,6 +113,7 @@ class Cell:
 		self.h2cs=[]
 		self.state = initial_state
 		self.next_state = None
+		# factorizable
 		self.neighbors = [[0,0,0],[0,0,0],[0,0,0]]
 		self.origin=[]
 		self.destination=[]
@@ -131,6 +147,7 @@ class Cell:
 	def update_state(self):
 		self.state = self.next_state
 	
+	# factorizable
 	def updateColor(self):
 		count=len(self.origin+self.destination)
 		if count==0:
@@ -182,6 +199,7 @@ class Block:
 		self.velocities=[]
 		self.sugar(
 			Street([ (-1,3), (3,3), (3,-1) ], 1,2), # Rotonda
+			# parametrizable
 			#Street([(r,3), (r,-1)],1,2), # Cruce
 			#Street([(-1,r),(3,r)],1,2),
 
@@ -319,6 +337,7 @@ class Block:
 				lastx=xx
 				lasty=yy
 		
+# separable interfaz y modelo
 class City:
 	def __init__(self,p, block):
 		self.p=p
@@ -350,7 +369,7 @@ class City:
 
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
-		plt.show()
+		plt.show(block=True)
 	
 	def update(self,frameNum, img, grid, heigh, width):
 		try:
@@ -395,8 +414,8 @@ class City:
 							yield
 						yieldI+=1
 
-			numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
-			numberCarsPerBlock=self.p.numberCarsPerBlock
+			#numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
+			numberCars=self.p.numberCars
 			numberStations=self.p.numberStations
 			numberChargingPerStation=self.p.numberChargingPerStation
 
@@ -418,7 +437,7 @@ class City:
 
 			# Put cars
 			self.cars=[]
-			for _ in range(numberCarsPerBlock*numberBlocks): # number of cars
+			for _ in range(numberCars): # number of cars
 				self.cars.append(Car(self.p,self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
 				if yieldCada<=yieldI:
 					yieldI=0
@@ -483,6 +502,7 @@ class Grid:
 		return dx + dy
 	
 	def randomStreet(self):
+		# If the random is fixed and introduced on cars we can reproduce the same simulation
 		while True:
 			x = random.randint(0,self.width-1)
 			y = random.randint(0,self.heigh-1)
@@ -562,6 +582,8 @@ class Car:
 			toCell.t=t
 			self.moves-=1
 		else:
+			# getAttrib 
+			# devolver tiempo....
 			dis,ire=self.aStart(cell,self.target)
 			dis2,_=self.localizeCS(ire)
 			if self.moves<dis+dis2:
@@ -586,6 +608,9 @@ class Car:
 		if self.queda==0:
 			return False
 		return True
+	
+	def aStart(self,cell:Cell,target:Cell):
+		return getattr(self,"aStart"+self.p.aStarMethod)(cell,target)
 
 	def aStartDistance(self,cell:Cell,target:Cell):
 		# Distance version
@@ -615,32 +640,116 @@ class Car:
 
 	def aStartTime(self,cell:Cell,target:Cell):
 		# Time version
-		# only mark visited if it has more than one destination
-		visited={}
-		visited.add(cell)
-		opened={}
-		for d in cell.destination:
-			opened[d]=d
-		opened2={}
-		distancia=1
+		
+		visited=[TimeNode(self.p,i) for i in range(self.p.aStartDeep)]
+		visited[0].setCell(self.grid,cell,target,0)
+
+		def selectBest():
+			'''
+			If reached target we can't select
+			Only best of best is super-momorized, the others in target are destroyed
+			'''
+			bestTarget=None
+			best=None
+			for i in range(0,len(visited)):
+				if visited[i].cell==None:
+					continue
+				if visited[i].cell==target:
+					if bestTarget==None:
+						bestTarget=visited[i]
+					else:
+						if bestTarget.heuristic()>visited[i].heuristic():
+							bestTarget.cell=None
+							bestTarget=visited[i]
+					continue
+				elif best==None or visited[i].heuristic()<best.heuristic():
+					best=visited[i]
+			# is valid?
+			if bestTarget!=None and bestTarget.heuristic()<best.heuristic():
+				return bestTarget
+			if best==None:
+					print("best is None")
+			return best
+		
+		def selectWorst():
+			best=visited[0]
+			for i in range(1,len(visited)):
+				if visited[i].cell==None:
+					return visited[i]
+				if visited[i].heuristic()>best.heuristic():
+					best=visited[i]
+			return best
+		
+		best=selectBest()
+		movesToStop=0
 		while True:
-			# solo se añaden los visited con mas de uno
-			for (o,r) in opened.items():
-				if o==target:
-					return (distancia,opened[o])
-				if len(o.destination)==1:
-					opened2[o.destination[0]]=r
-				else:
-					if o not in visited:
-						visited.add(o)
-						for d in o.destination:
-							opened2[d]=r
-			opened=opened2
-			opened2={}
-			distancia+=1
+			# spanish: Recorre todos los target del mejor
+			# english: Go through all the targets of the best
+			for d in best.cell.destination:
+				# spanish: Cuando se llega al target no se ha terminado necesariamente
+				# english: When the target is reached, it is not necessarily finished
+				
+				# factor común, reemplazo tentativo.
+				worst=selectWorst()
+				worst.backup() 
+				worst.setCell(self.grid,d,target,best.distance+1)
+				worst.time=best.time+1/best.cell.velocity
+				worst.decision=best.decision
+				if best.time==0: # first move, memorize decision
+					worst.decision=d
+				worst.undoBackupIfWorst()
+			# free best
+			best.cell=None
+
+			# if reached target we can't select
+			# only best of best is super-momorized
+			best=selectBest()
+			# stops criterias:
+			# if reached target and others are worst
+			if best.cell==target:
+				stopCriteria=True
+				for d in visited:
+					if d.heuristic()<best.heuristic():
+						stopCriteria=False
+						break
+				if stopCriteria:
+					return best.distance,best.decision
+			# by number of moves
+			movesToStop+=1
+			if self.p.aStarStepsPerCar<movesToStop:
+				return best.distance,best.decision
 
 class TimeNode:
-	pass
+	def __init__(self,p,id):
+		self.p=p
+		self.id=id
+		self.cell=None
+		self.time=0
+		self.decision=None
+		self.remainder=0
+		self.distance=0
+	def backup(self):
+		self.backupCell=self.cell
+		self.backupTime=self.time
+		self.backupDecision=self.decision
+		self.backupRemainder=self.remainder
+		self.backupHeuristic=self.heuristic()
+		self.backupDistance=self.distance
+	def undoBackupIfWorst(self):
+		if self.backupCell!=None and self.heuristic()<self.backupHeuristic:
+			self.cell=self.backupCell
+			self.time=self.backupTime
+			self.decision=self.backupDecision
+			self.remainder=self.backupRemainder
+			self.distance=self.backupDistance
+	def heuristic(self):
+		if self.cell==None:
+			return math.inf
+		return self.time+self.remainder*self.p.aStarRemainderWeight
+	def setCell(self,grid:Grid,cell:Cell,target:Cell,distance):
+		self.cell=cell
+		self.remainder=grid.distance(cell.x,cell.y,target.x,target.y)
+		self.distance=distance
 
 p=Parameters()
 c=City(p,Block())
