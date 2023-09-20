@@ -1,3 +1,4 @@
+from time import sleep
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -8,6 +9,20 @@ import traceback
 import math
 
 class Parameters:
+	"""
+	Parameters of the simulation
+
+	Attributes:
+		verticalBlocks (int): Number of vertical blocks
+		horizontalBlocks (int): Number of horizontal blocks
+		numberCarsPerBlock (int): Number of cars per block
+		numberStations (int): Number of charging stations
+		numberChargingPerStation (int): Number of charging per station
+		carMovesFullDeposity (int): Number of moves when the car is full
+		carRechargePerTic (int): Number of moves that the car recharge per tic
+		opmitimizeCSSearch (int): Number of charging stations to store in bifurcation cell to optimize the search
+		viewDrawCity (bool): If true, draw the city
+	"""
 	def __init__(self):
 		self.verticalBlocks=2
 		self.horizontalBlocks=2
@@ -33,8 +48,19 @@ class Parameters:
 Spanish: La distancia y el consumo de combustibre en esta versión son iguales. Astar deberá adaptarse cuando se cambie esta simplificación.
 English: The distance and fuel consumption in this version are the same. Astar will have to adapt when this simplification is changed.
 '''
-
 class ChargingStation:
+	"""
+	Charging station is a cell that can charge cars. It has a queue of cars and a number of charging slots.
+	The chargins statation (CS) alson has a route map to all cells of the city. This route map is used to calculate the distance to the CS.
+
+	Attributes:
+		p (Parameters): Parameters of the simulation
+		grid (Grid): Grid of the city
+		cell (Cell): Cell of the grid where the CS is located
+		numberCharging (int): Number of charging slots
+		queue (List[Car]): Queue of cars
+		car (List[Car]): List of cars in the charging slots
+	"""
 	def __init__(self,p,grid,coordinates ,numberCharging):
 		self.p=p
 		self.grid=grid
@@ -99,11 +125,23 @@ class ChargingStation:
 			current_level = next_level
 
 class HeuristicToCS:
+	"""
+	Heuristic to Charging Station is a class that stores the distance to a CS in a bifurcation cell.
+	It is a first version of the route map. 
+	"""
 	def __init__(self,cs:ChargingStation,distance:int):
 		self.cs=cs
 		self.distance=distance
 
 class Cell:    
+	"""
+	Cell is a class that represents a cell of the grid. It can be a street, a bifurcation or free. 
+	It contains a maximun of a car and a CS. 
+	When it is a street, it has a velocity and a direct link to the nexts cells. 
+	The time (t) is used to ensure that the cars respect the security distance. It is like a snake game. 
+	Same t represents the tail of the snake.
+	"""
+
 	# factorizable
 	ONE=1
 	TWO=2
@@ -190,8 +228,22 @@ class Cell:
 		return r
 
 Street = namedtuple('Street', ['path', 'velocity','lames'])
+Street.__doc__="""
+Street is used as sugar syntax to define a street.
+
+Attributes:
+	path (List[tuple]): List of points of the street
+	velocity (int): Velocity of the street
+	lames (int): Number of lames of the street
+"""
 
 class Block:
+	"""
+	Block is used as sugar syntax to define the streets. 
+	The direction of the streets is important because the cars can only move in the direction of the streets.
+	At same time you draw the block connet the cells of the grid.
+	The construction is a list of streets that is rotated 90 degrees to fill the mosaique of the block.
+	"""
 
 	def __init__(self):
 		r = 1
@@ -339,7 +391,13 @@ class Block:
 		
 # separable interfaz y modelo
 class City:
+	"""
+	City is a general holder of the simulation. It encapsules low level details of the graphics representation.
+	generators are used to draw the buildings of the city and the simulation. It uses the yield instruction.
+	Yield can stop the execution of the container function and can be used recursively.
+	"""
 	def __init__(self,p, block):
+		
 		self.p=p
 		self.block=block
 		self.grid=Grid(p.verticalBlocks*block.height,p.horizontalBlocks*block.width)
@@ -352,11 +410,21 @@ class City:
 		#g=Grid(100,100)
 
 		# Animation
-		next(self.city_generator)
-		next(self.city_generator)
+		#next(self.city_generator)
+		#next(self.city_generator)
+		
+	def shell(self):
+		while True:
+			shell=input("Simtravel3> ")
+			if shell=="plot":
+				self.plot()
+			else:
+				# split shell
+				shell2=shell.split(" ")
+				if self.p.__dict__.get(shell2[0])!=None:
+					setattr(self.p,shell2[0],int(shell2[1]))
 
-	
-	def plotCity(self):
+	def plot(self):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
@@ -369,7 +437,7 @@ class City:
 
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
-		plt.show(block=True)
+		plt.show(block=False	)
 	
 	def update(self,frameNum, img, grid, heigh, width):
 		try:
@@ -419,7 +487,7 @@ class City:
 			numberStations=self.p.numberStations
 			numberChargingPerStation=self.p.numberChargingPerStation
 
-			# Put cs (Charge Stations)
+      # Put cs (Charge Stations)
 			self.cs=[]
 			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
 				self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
@@ -478,6 +546,12 @@ class City:
 			print(traceback.format_exc())  # Esto imprime la traza completa del error
 
 class Grid:
+	"""
+	Grid is a class that represents the grid of the city. It is a matrix of cells.
+	It stores the intersections of the city to make a semaphore. 
+	Also coinains several utility functions to calculate the distance between two cells, to get a random street, and 
+	to link two cells.
+	"""
 	def __init__(self, heigh, width):
 		self.width = width
 		self.heigh = heigh
@@ -521,6 +595,12 @@ class Grid:
 				self.intersections.append(target)
 
 class Car:
+	"""
+	The car class represents a car of the simulation. The moveCar function is the main function. 
+	The car moves from one cell to another. Sometimes it is only one cell, but sometimes 
+	there are more than one cell (bifurcation). In this case, the car uses the A* algorithm to find the best path.
+	If the car has not enough moves to reach the target, it will try to reach the nearest CS to recharge.
+	"""
 	def __init__(self,p : Parameters, grid: Grid, xy,targetCoordiantes:tuple):
 		self.p=p
 		self.grid = grid
@@ -622,6 +702,7 @@ class Car:
 			opened[d]=d
 		opened2={}
 		distancia=1
+
 		while True:
 			# solo se añaden los visited con mas de uno
 			for (o,r) in opened.items():
@@ -751,6 +832,9 @@ class TimeNode:
 		self.remainder=grid.distance(cell.x,cell.y,target.x,target.y)
 		self.distance=distance
 
-p=Parameters()
-c=City(p,Block())
-c.plotCity()
+if __name__ == '__main__':
+	p=Parameters()
+	block=Block()
+	city=City(p,block)
+	city.shell()
+	
