@@ -1,6 +1,6 @@
 MENSAJE_COMMIT="$1"
 
-pydoc3 citybuilder.py > README.mod
+pdoc3 citybuilder.py > README.mod
 git add --all
 git commit -m "$MENSAJE_COMMIT"
 git push
