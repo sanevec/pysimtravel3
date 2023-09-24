@@ -7,6 +7,11 @@ import random
 from collections import namedtuple
 import traceback
 import math
+from enum import IntEnum
+import json
+import time
+
+random.seed(0) # To reproduce the same simulation, comment this line to get a random simulation
 
 class Parameters:
 	"""
@@ -26,30 +31,49 @@ class Parameters:
 	def __init__(self):
 		self.verticalBlocks=2
 		self.horizontalBlocks=2
-		self.numberCars=1
+		self.numberCars=100
 		self.numberStations=1
-		self.numberChargingPerStation=1
+		self.numberChargingPerStation=10
 		self.carMovesFullDeposity=10000
 		self.carRechargePerTic=10
 		self.opmitimizeCSSearch=10 # bigger is more slow
 
-		self.aStarMethod="Time" # Time or Distance
+		self.aStarMethod="Distance" # Time or Distance
+		self.aStarCalculateEach=3 # The aStar calculation is slow, so we can calculate it each n bifurcation cells
 
 		# when aStarMethod is Time
-		self.aStartDeep=5 # bigger is more slow, more precision
-		self.aStarRemainderWeight=2 # weight of lineal distance to target to time
-		self.aStarStepsPerCar=2000 # bigger is more slow, more precision
+		self.aStarDeep=10 # bigger is more slow, more precision
+		self.aStarRemainderWeight=2 #math.sqrt(2) # weight of lineal distance to target to time
+		# self.aStarStepsPerCar=100000 # bigger is more slow, more precision
 
 		# interface parameters
 		self.viewDrawCity=False
-		self.viewAStart=True
+		self.statsFileName="stats1" # if "" then not save
 
-'''
-Spanish: La distancia y el consumo de combustibre en esta versión son iguales. Astar deberá adaptarse cuando se cambie esta simplificación.
-English: The distance and fuel consumption in this version are the same. Astar will have to adapt when this simplification is changed.
-'''
+class CarPriority(IntEnum):
+	'''
+	CarPriority is used to define the priority of the execution in the grid.
+	Our Cellular Automata is asynchronous. Some cells (with cars) are executed before than others.
+	'''
+	StopedNoPriority = -2
+	StopedPriority = -1
+	NoAsigned=0
+	Priority = 1
+	NoPriority = 2
+
+class CarState(IntEnum):
+	'''
+	CarState is used to evaluate the efficiency of the ubication of the charging stations.
+	'''
+	Driving = 1
+	Waiting = 2
+	ToCharging = 3
+	ChargingQueue = 4
+	ChargingSlot = 5
+
 class ChargingStation:
 	"""
+	The distance and fuel consumption in this version are the same. Astar will have to adapt when this simplification is changed.
 	Charging station is a cell that can charge cars. It has a queue of cars and a number of charging slots.
 	The chargins statation (CS) alson has a route map to all cells of the city. This route map is used to calculate the distance to the CS.
 
@@ -61,30 +85,28 @@ class ChargingStation:
 		queue (List[Car]): Queue of cars
 		car (List[Car]): List of cars in the charging slots
 	"""
-	def __init__(self,p,grid,coordinates ,numberCharging):
+	def __init__(self,p,grid,cell ,numberCharging):
 		self.p=p
 		self.grid=grid
-		cell=self.grid.grid[coordinates[0],coordinates[1]]
 		self.cell=cell
 		cell.cs=self
 		self.numberCharging=numberCharging
 		self.queue=[]
 		self.car=[None for i in range(numberCharging)]
-
+		self.carsInCS=0
 		self.insertInRouteMap(cell)
 	
 	def moveCS(self):
-		if len(self.queue)==0:
+		if self.carsInCS==0:
 			return
-		# Spanish: Si hay un coche en la cola, y hay un hueco en la estación, entonces el coche entra en la estación
-		# English: If there is a car in the queue, and there is a gap in the station, then the car enters the station
+		# If there is a car in the queue, and there is a gap in the station, then the car enters the station
 		while 0<len(self.queue) and None in self.car:
 			car=self.queue.pop(0)
 			i=self.car.index(None)
 			self.car[i]=car
+			car.state=CarState.ChargingSlot
 
-		# Spanish: Recarga los coches que están en el cargador
-		# English: Recharge the cars that are in the charger
+		# Recharge the cars that are in the charger
 		candidateToLeave=-1
 		for i in range(self.numberCharging):
 			if self.car[i]!=None:
@@ -93,15 +115,22 @@ class ChargingStation:
 				if self.car[i].moves>self.p.carMovesFullDeposity:
 					self.car[i].moves=self.p.carMovesFullDeposity
 					candidateToLeave=i
+
 		#candidateToLeave=-1
 		if 0<=candidateToLeave and self.cell.car==None:
 			car=self.car[candidateToLeave]
 			self.car[candidateToLeave]=None
-			car.charging=False
+			car.state=CarState.Driving
 			car.target2=None
 			self.cell.car=car
+			self.carsInCS-=1
 
 	def insertInRouteMap(self, cell):
+		'''
+		Insert the CS in the route map of the city.
+		This a reverse version of the A* algorithm. 
+		It is used to calculate the distance to the CSs near on the bifurcation cells. 
+		'''
 		visited = []
 		distance = 0
 		current_level = [cell]
@@ -115,12 +144,12 @@ class ChargingStation:
 				if len(current_cell.destination) > 1:
 					current_cell.h2cs.append(HeuristicToCS(self, distance))
 
-				# Añadir los orígenes a la lista del siguiente nivel
+				# Add the origins to the list of the next level
 				for origin in current_cell.origin:
 					if origin not in visited:
 						next_level.append(origin)
 
-			# Incrementar la distancia y mover al siguiente nivel
+			# Increase the distance and move to the next level
 			distance += 1
 			current_level = next_level
 
@@ -225,6 +254,11 @@ class Cell:
 			r=5
 		if cell.cs!=None:
 			r=4
+		
+		# car 0 target is red
+		if 0<len(city.cars) and city.cars[0].target==cell:
+			r=3
+
 		return r
 
 Street = namedtuple('Street', ['path', 'velocity','lames'])
@@ -250,7 +284,7 @@ class Block:
 		self.lanes=[]
 		self.velocities=[]
 		self.sugar(
-			Street([ (-1,3), (3,3), (3,-1) ], 1,2), # Rotonda
+			Street([ (-1,3), (3,3), (3,-1) ], 1,1), # Rotonda
 			# parametrizable
 			#Street([(r,3), (r,-1)],1,2), # Cruce
 			#Street([(-1,r),(3,r)],1,2),
@@ -407,6 +441,7 @@ class City:
 		city = self
 		self.city_generator = city.generator()
 		self.g=city.grid
+		self.cars=[]
 		#g=Grid(100,100)
 
 		# Animation
@@ -424,7 +459,7 @@ class City:
 				if self.p.__dict__.get(shell2[0])!=None:
 					setattr(self.p,shell2[0],int(shell2[1]))
 
-	def plot(self):
+	def plot(self,block=False):
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6]
@@ -437,7 +472,30 @@ class City:
 
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
-		plt.show(block=False	)
+		plt.show(block=block)
+
+	def runWithoutPlot(self, times):
+		initial_time = time.time()
+
+		for i in range(times):
+			try:
+				next(self.city_generator)
+				elapsed_time = time.time() - initial_time
+				percentage_done = (i + 1) / times * 100
+
+				# Estimación del tiempo total basado en el progreso actual
+				total_estimated_time = elapsed_time / (percentage_done / 100)
+				estimated_completion_time = initial_time + total_estimated_time
+
+				print(
+					f"Progress: {percentage_done:.2f}% End: {time.strftime('%H:%M:%S', time.localtime(estimated_completion_time))} Total: {int(round(total_estimated_time))} seconds  ",
+					end="\r"
+				)
+			except StopIteration:
+				print("\ncity_generator has no more items to generate.")
+				break
+		print()  # Para un salto de línea final después de que el ciclo se complete
+		
 	
 	def update(self,frameNum, img, grid, heigh, width):
 		try:
@@ -477,24 +535,26 @@ class City:
 			for i in range(self.p.verticalBlocks):
 				for j in range(self.p.horizontalBlocks):
 					for _ in self.block.draw(self.grid,i*self.block.height+self.block.height//2,j*self.block.width+self.block.width//2):
-						if yieldCada<=yieldI:
-							yieldI=0
-							yield
-						yieldI+=1
+						if p.viewDrawCity:
+							if yieldCada<=yieldI:
+								yieldI=0
+								yield
+							yieldI+=1
 
 			#numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
 			numberCars=self.p.numberCars
 			numberStations=self.p.numberStations
 			numberChargingPerStation=self.p.numberChargingPerStation
 
-      # Put cs (Charge Stations)
+     		# Put cs (Charge Stations)
 			self.cs=[]
 			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
 				self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
-				if yieldCada<=yieldI:
-					yieldI=0
-					yield
-				yieldI+=1
+				if p.viewDrawCity:
+					if yieldCada<=yieldI:
+						yieldI=0
+						yield
+					yieldI+=1
 
 
 			# Orden and filter cs by p.opmitimizeCSSearch
@@ -507,34 +567,48 @@ class City:
 			self.cars=[]
 			for _ in range(numberCars): # number of cars
 				self.cars.append(Car(self.p,self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
-				if yieldCada<=yieldI:
-					yieldI=0
-					yield
-				yieldI+=1
+				if p.viewDrawCity:
+					if yieldCada<=yieldI:
+						yieldI=0
+						yield
+					yieldI+=1
 
 			# Simulation
+			self.stats=Stats(self.p)
 			while True:
 				self.t+=1
-				moreMove=self.cars
-				noMove=[]
+				self.stats.setT(self.t)
+				firstTime=True
 				while True:
-					moreMove2=[]
-					for car in moreMove:
-						move=car.moveCar(self.t)
-						if move:
-							moreMove2.append(car)
-						else:
-							noMove.append(car)
-					if len(moreMove2)==0:
+					if firstTime:
+						goPriority=0
+					else:
+						goPriority=minPriority
+					maxPriority=-math.inf
+					minPriority=math.inf
+					for numcar,car in enumerate(self.cars):
+						self.stats.addCarState(numcar,car.state)
+						if car.isCharging():
+							continue
+						if firstTime:
+							if car.priority<0:
+								car.priority=-car.priority
+							car.queda=car.cell.velocity
+
+						if car.priority==goPriority:
+							car.moveCar(self.t)
+						if car.priority<minPriority and 0<=car.priority:
+							minPriority=car.priority
+						if maxPriority<car.priority:
+							maxPriority=car.priority
+							
+					firstTime=False
+					if maxPriority<0:
 						break
-					moreMove=moreMove2
-					for inter in self.grid.intersections:
-						inter.update(self.t)
+
 
 				for cs in self.cs:
 					cs.moveCS()
-
-				self.cars=noMove
 
 				yieldCada=1
 				if yieldCada<=yieldI:
@@ -582,7 +656,7 @@ class Grid:
 			y = random.randint(0,self.heigh-1)
 			cell=self.grid[y][x]
 			if cell.state!=Cell.FREE and cell.car==None:
-				return (y,x)
+				return cell
 	def link(self,origin,target,velocity):
 		if origin!=None:
 			target.origin.append(origin)
@@ -601,27 +675,31 @@ class Car:
 	there are more than one cell (bifurcation). In this case, the car uses the A* algorithm to find the best path.
 	If the car has not enough moves to reach the target, it will try to reach the nearest CS to recharge.
 	"""
-	def __init__(self,p : Parameters, grid: Grid, xy,targetCoordiantes:tuple):
+	def __init__(self,p : Parameters, grid: Grid, cell,target):
+		self.state:CarState=CarState.Driving
+
 		self.p=p
 		self.grid = grid
-		self.x = xy[0]
-		self.y = xy[1]
+		self.cell=cell
+		cell.car=self
+		self.priority=CarPriority.NoAsigned
 
-		self.target=self.grid.grid[targetCoordiantes[0],targetCoordiantes[1]]
+		self.target=target
 		self.target2=None # if need to recharge
-		self.grid.grid[self.y, self.x].car = self
+
 		self.queda=0
 		# Change V2 to V3. Why use normal? A normal is a sum of uniform distributions. The normal is not limited to [0,1] but the uniform is. The normal by intervals.
 		self.moves=p.carMovesFullDeposity*random.random() 
 
 		# initial moves must be enough to reach the CS at least
-		dis,_=self.localizeCS(self.grid.grid[self.y,self.x])	
+		dis,_=self.localizeCS(cell)	
 		if self.moves<dis:
 			self.moves=dis
-		self.charging=False
+		
+		self.toCell=None
 
 	def inTarget(self,target):
-		return self.grid.grid[self.y,self.x]==target
+		return self.cell==target
 	
 	def localizeCS(self,cell:Cell,distance=0):
 		if cell.cs!=None:
@@ -634,61 +712,75 @@ class Car:
 		aux=cell.h2cs[0]
 		return (distance+aux.distance,aux.cs)
 	
+	def isCharging(self):
+		return self.state==CarState.ChargingQueue or self.state==CarState.ChargingSlot
+
 	def moveCar(self,t):
 		if self.inTarget(self.target):
-			(y,x)=self.grid.randomStreet()
-			self.target=self.grid.grid[y,x]
+			self.target=self.grid.randomStreet()
 		if self.inTarget(self.target2):
-			# enter on CS
-			if not self.charging:
+			# There is no error if pass over target2, because target2 is only set when there is need to recharge	
+			if not self.isCharging():
+				# enter on CS
 				cs=self.target2.cs
 				self.target2.cs.queue.append(self)
+				self.target2.cs.carsInCS+=1
 				self.target2.car=None
-				self.charging=True
+				self.state=CarState.ChargingQueue
 			return
 		
-		cell=self.grid.grid[self.y,self.x]
-		if t!=cell.t:
-			self.queda=cell.velocity
-		cell.t=t
-		if len(cell.destination)==1:
-			toCell=cell.destination[0]
-			if toCell.t==t or toCell.car!=None:
-				return False #ocupado por otro
-			self.x = toCell.x
-			self.y = toCell.y
-			cell.car = None
-			toCell.car = self
-			toCell.t=t
-			self.moves-=1
+		cell=self.cell
+		
+		toCell=self.toCell
+		if toCell==None:
+			toCell=cell
 		else:
-			# getAttrib 
-			# devolver tiempo....
-			dis,ire=self.aStart(cell,self.target)
+			if toCell.t==t or toCell.car!=None: 
+				self.state=CarState.Waiting
+				self.priority=-abs( self.priority)
+				return
+
+		cell.t=t
+		
+		self.cell = toCell
+		cell.car = None
+		toCell.car = self
+
+		# Calculate toCell
+		if len(toCell.destination)==1:
+			# Calculate the index of the priority
+			self.toCell=toCell.destination[0]
+			if self.target2!=None:
+				self.state=CarState.ToCharging
+			else:
+				self.state=CarState.Driving
+			#self.priority=indexOf(toCell.destination[0].origin,toCell)
+		else:
+			dis,ire=self.aStart(toCell,self.target)
 			dis2,_=self.localizeCS(ire)
 			if self.moves<dis+dis2:
+				self.state=CarState.ToCharging
 				# There are not enough moves, need to recharge in CS first
-				dis3,cs=self.localizeCS(cell)
+				dis3,cs=self.localizeCS(toCell)
 				if self.moves<dis3:
 					# There are not enough moves, event with recharge in CS
 					#return False
 					pass
-				ire=self.aStart(cell,cs.cell)[1]
+				ire=self.aStart(toCell,cs.cell)[1]
 				self.target2=cs.cell
-			if ire.t==t or ire.car!=None:
-				return False
-			self.x = ire.x
-			self.y = ire.y
-			cell.car = None
-			ire.car = self
-			ire.t=t
-			self.moves-=1
-	
+			else:
+				self.state=CarState.Driving
+			# if ire.t==t or ire.car!=None:
+			# 	return False
+			self.toCell=ire
+		
+		self.priority=self.toCell.origin.index(toCell)+1
+
+		self.moves-=1
 		self.queda-=1
 		if self.queda==0:
-			return False
-		return True
-	
+			self.priority=-abs(self.priority)
+
 	def aStart(self,cell:Cell,target:Cell):
 		return getattr(self,"aStart"+self.p.aStarMethod)(cell,target)
 
@@ -721,9 +813,9 @@ class Car:
 
 	def aStartTime(self,cell:Cell,target:Cell):
 		# Time version
-		
-		visited=[TimeNode(self.p,i) for i in range(self.p.aStartDeep)]
-		visited[0].setCell(self.grid,cell,target,0)
+		visited={}
+		opening=[TimeNode(self.p,i) for i in range(self.p.aStarDeep)]
+		opening[0].setCell(self.grid,cell,target,0)
 
 		def selectBest():
 			'''
@@ -732,73 +824,80 @@ class Car:
 			'''
 			bestTarget=None
 			best=None
-			for i in range(0,len(visited)):
-				if visited[i].cell==None:
+			for i in range(0,len(opening)):
+				if opening[i].cell==None:
 					continue
-				if visited[i].cell==target:
+				if opening[i].cell==target:
 					if bestTarget==None:
-						bestTarget=visited[i]
+						bestTarget=opening[i]
 					else:
-						if bestTarget.heuristic()>visited[i].heuristic():
+						if bestTarget.heuristic()>opening[i].heuristic():
 							bestTarget.cell=None
-							bestTarget=visited[i]
+							bestTarget=opening[i]
 					continue
-				elif best==None or visited[i].heuristic()<best.heuristic():
-					best=visited[i]
+				elif best==None or opening[i].heuristic()<best.heuristic():
+					best=opening[i]
+
+			if best==None:
+				return bestTarget
 			# is valid?
 			if bestTarget!=None and bestTarget.heuristic()<best.heuristic():
 				return bestTarget
 			if best==None:
 					print("best is None")
 			return best
-		
+
 		def selectWorst():
-			best=visited[0]
-			for i in range(1,len(visited)):
-				if visited[i].cell==None:
-					return visited[i]
-				if visited[i].heuristic()>best.heuristic():
-					best=visited[i]
-			return best
+			worst=None
+			for i in range(0,len(opening)):
+				if opening[i].cell==None:
+					return opening[i]
+				if worst==None or opening[i].heuristic()>worst.heuristic():
+					worst=opening[i]
+			return worst
 		
 		best=selectBest()
-		movesToStop=0
+		# movesToStop=0
+		#print("Target: (",target.x,",",target.y,")")
 		while True:
-			# spanish: Recorre todos los target del mejor
-			# english: Go through all the targets of the best
-			for d in best.cell.destination:
-				# spanish: Cuando se llega al target no se ha terminado necesariamente
-				# english: When the target is reached, it is not necessarily finished
-				
-				# factor común, reemplazo tentativo.
-				worst=selectWorst()
-				worst.backup() 
-				worst.setCell(self.grid,d,target,best.distance+1)
-				worst.time=best.time+1/best.cell.velocity
-				worst.decision=best.decision
-				if best.time==0: # first move, memorize decision
-					worst.decision=d
-				worst.undoBackupIfWorst()
+			# Go through all the targets of the best
+			yet=visited.get(best.cell)
+			if yet==None or best.time<yet:
+				visited[best.cell]=best.time
+				for d in best.cell.destination:
+					# When the target is reached, it is not necessarily finished				
+					worst=selectWorst()
+					worst.backup() 
+
+					worst.setCell(self.grid,d,target,best.distance+1)
+					worst.time=best.time+1/best.cell.velocity
+					worst.decision=best.decision
+					if best.time==0: # first move, memorize decision
+						worst.decision=d
+					worst.undoBackupIfWorst()
 			# free best
 			best.cell=None
 
 			# if reached target we can't select
 			# only best of best is super-momorized
 			best=selectBest()
+
+			#print("(",best.cell.x,",",best.cell.y,")",best.remainder)
+
 			# stops criterias:
 			# if reached target and others are worst
 			if best.cell==target:
 				stopCriteria=True
-				for d in visited:
+				for d in opening:
 					if d.heuristic()<best.heuristic():
 						stopCriteria=False
 						break
 				if stopCriteria:
 					return best.distance,best.decision
 			# by number of moves
-			movesToStop+=1
-			if self.p.aStarStepsPerCar<movesToStop:
-				return best.distance,best.decision
+			# movesToStop+=1
+			# if self.p.aStarStepsPerCar<movesToStop:
+			#  	return best.distance,best.decision
 
 class TimeNode:
 	def __init__(self,p,id):
@@ -817,7 +916,7 @@ class TimeNode:
 		self.backupHeuristic=self.heuristic()
 		self.backupDistance=self.distance
 	def undoBackupIfWorst(self):
-		if self.backupCell!=None and self.heuristic()<self.backupHeuristic:
+		if self.backupCell!=None and self.heuristic()>self.backupHeuristic:
 			self.cell=self.backupCell
 			self.time=self.backupTime
 			self.decision=self.backupDecision
@@ -832,9 +931,80 @@ class TimeNode:
 		self.remainder=grid.distance(cell.x,cell.y,target.x,target.y)
 		self.distance=distance
 
+class Stats:
+	def __init__(self,p):
+		self.carStateFile=None
+		self.carStateFileName=p.statsFileName
+		if p.statsFileName=="":
+			return
+		self.carStateFileName=p.statsFileName+"_carstate.json"
+
+	def setT(self,t):
+		if self.carStateFileName=="":
+			return
+		if self.carStateFile==None:
+			# Open file
+			self.carStateFile=open(self.carStateFileName,"w")
+			self.car=[]
+			self.t=0		
+		else:
+			json.dump(self.car,self.carStateFile)
+			self.carStateFile.write("\n")  # New line for each t-step
+		self.t=t
+
+	def addCarState(self,num,carState):
+		if self.carStateFileName=="":
+			return
+		while len(self.car)<=num:
+			self.car.append({})
+		self.car[num]=carState	
+
+	def plot(self):
+		# close file
+		if self.carStateFile is not None:
+			self.carStateFile.close()
+			
+		# Load data from file
+		data_over_time = []
+		with open(self.carStateFileName, 'r') as file:
+			for line in file:
+				data_over_time.append(json.loads(line))
+
+		all_values = list(CarState)
+
+		counts_over_time = {value: [arr.count(value.value) for arr in data_over_time] for value in all_values}
+
+		# Plot using a stacked area plot
+		x = range(len(data_over_time))
+		prev_values = np.zeros(len(data_over_time))
+		for value in all_values:
+			current_values = prev_values + np.array(counts_over_time[value])
+			plt.fill_between(x, prev_values, current_values, label=f'{value.name}')
+			prev_values = current_values
+
+		plt.xlabel('Time')
+		plt.ylabel('Number of Occurrences')
+		plt.title('Distribution of values over time')
+		#plt.xticks(ticks=range(len(data_over_time)), labels=[f'{i+1}' for i in range(len(data_over_time))])
+		plt.legend(loc='lower left')  
+
+		plt.show()
+		print()
+
+
+
 if __name__ == '__main__':
 	p=Parameters()
 	block=Block()
 	city=City(p,block)
-	city.shell()
+	initialTime=time.time()
+	#city.shell()
+	# city.plot(True)
+	city.runWithoutPlot(100000)
+	city.stats.carStateFile.close()
+	# print("Time: ",int(round(time.time()-initialTime),"s"))
+	# city.stats.plot()
+
+	stats=Stats(p)
+	stats.plot()
 	
