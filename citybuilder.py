@@ -29,26 +29,42 @@ class Parameters:
 		viewDrawCity (bool): If true, draw the city
 	"""
 	def __init__(self):
-		self.verticalBlocks=2
-		self.horizontalBlocks=2
-		self.numberCars=100
-		self.numberStations=1
-		self.numberChargingPerStation=10
-		self.carMovesFullDeposity=10000
-		self.carRechargePerTic=10
-		self.opmitimizeCSSearch=10 # bigger is more slow
+		self.verticalBlocks=1
+		self.horizontalBlocks=1
+		self.numberStationsPerBlock=4# tipical 1/(vb*hb),1, 4 
+		self.numberChargersPerBlock=8
 
-		self.aStarMethod="Distance" # Time or Distance
-		self.aStarCalculateEach=3 # The aStar calculation is slow, so we can calculate it each n bifurcation cells
+		self.numberBlocks=self.verticalBlocks*self.horizontalBlocks
+		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
+		self.numberChargers=self.numberChargersPerBlock*self.numberBlocks
+		self.numberChargingPerStation=self.numberChargers//self.numberStations
+		self.numberCars=10
+		# to allow to move all cars at medium velocity
+		self.mediumVelocity=2
+		self.carRechargePerTic=self.numberCars*self.mediumVelocity/self.numberChargers
+
+
+		self.carMovesFullDeposity=27000
+
+
+		self.opmitimizeCSSearch=3 # bigger is more slow
+		self.carSizeTarget=20
+
+		self.aStarMethod="Time" # Time or Distance
+		self.aStarAddCSTimeSteps=False
 
 		# when aStarMethod is Time
-		self.aStarDeep=10 # bigger is more slow, more precision
+		self.aStarAddRoadCarAsTimeSteps=0
+		self.aStarUseCellAverageVelocity=True
+		self.aStarUseCellExponentialWeight=0.5 # 0 disable, 0-1 weight of old velocity data
+		self.aStarCalculateEach=5 # The aStar calculation is slow, so we can calculate it each n bifurcation cells
+		self.aStarDeep=100 # bigger is more slow, more precision
 		self.aStarRemainderWeight=2 #math.sqrt(2) # weight of lineal distance to target to time
 		# self.aStarStepsPerCar=100000 # bigger is more slow, more precision
 
 		# interface parameters
 		self.viewDrawCity=False
-		self.statsFileName="stats1" # if "" then not save
+		self.statsFileName="stats1" # if "" then not save / stats1
 
 class CarPriority(IntEnum):
 	'''
@@ -65,8 +81,9 @@ class CarState(IntEnum):
 	'''
 	CarState is used to evaluate the efficiency of the ubication of the charging stations.
 	'''
-	Driving = 1
-	Waiting = 2
+	Destination = 0
+	Waiting = 1
+	Driving = 2
 	ToCharging = 3
 	ChargingQueue = 4
 	ChargingSlot = 5
@@ -85,18 +102,29 @@ class ChargingStation:
 		queue (List[Car]): Queue of cars
 		car (List[Car]): List of cars in the charging slots
 	"""
-	def __init__(self,p,grid,cell ,numberCharging):
+	def __init__(self,p,grid,cell):
 		self.p=p
 		self.grid=grid
 		self.cell=cell
 		cell.cs=self
+		# Note: factorizable
+		numberCharging=int(p.numberChargingPerStation)
 		self.numberCharging=numberCharging
 		self.queue=[]
 		self.car=[None for i in range(numberCharging)]
 		self.carsInCS=0
-		self.insertInRouteMap(cell)
-	
-	def moveCS(self):
+
+		#self.insertInRouteMap(cell)
+
+	def TicksStepsToAttend(self):
+		total=0
+		for car in self.queue:
+			total+=(car.p.carMovesFullDeposity-car.moves)/car.p.carRechargePerTic
+		for car in self.car:
+			if car!=None:
+				total+=(car.p.carMovesFullDeposity-car.moves)/car.p.carRechargePerTic
+		return total/self.numberCharging	
+	def moveCS(self,t):
 		if self.carsInCS==0:
 			return
 		# If there is a car in the queue, and there is a gap in the station, then the car enters the station
@@ -124,13 +152,16 @@ class ChargingStation:
 			car.target2=None
 			self.cell.car=car
 			self.carsInCS-=1
+			car.cell=self.cell
+			car.calculateRoute(car.cell,t)
 
-	def insertInRouteMap(self, cell):
+	def insertInRouteMap(self):
 		'''
 		Insert the CS in the route map of the city.
 		This a reverse version of the A* algorithm. 
 		It is used to calculate the distance to the CSs near on the bifurcation cells. 
 		'''
+		cell=self.cell
 		visited = []
 		distance = 0
 		current_level = [cell]
@@ -141,13 +172,27 @@ class ChargingStation:
 			for current_cell in current_level:
 				visited.append(current_cell)
 
+				allowInsert=False
 				if len(current_cell.destination) > 1:
-					current_cell.h2cs.append(HeuristicToCS(self, distance))
+					# sort h2cs
+					# if worst is better than the current distance break propagation
+					if len(current_cell.h2cs)+1<self.p.opmitimizeCSSearch:
+						allowInsert=True
+					else:
+						if distance<current_cell.h2cs[-1].distance:
+							allowInsert=True
+					if allowInsert:
+						current_cell.h2cs.append(HeuristicToCS(self, distance))
+						current_cell.h2cs.sort(key=lambda x: x.distance)
+						current_cell.h2cs=current_cell.h2cs[:self.p.opmitimizeCSSearch]
+				else:
+					allowInsert=True
 
-				# Add the origins to the list of the next level
-				for origin in current_cell.origin:
-					if origin not in visited:
-						next_level.append(origin)
+				if allowInsert:
+					# Add the origins to the list of the next level
+					for origin in current_cell.origin:
+						if origin not in visited:
+							next_level.append(origin)
 
 			# Increase the distance and move to the next level
 			distance += 1
@@ -191,6 +236,10 @@ class Cell:
 		self.car=None
 		self.cs=None
 		self.t=0
+		self.semaphore=[] # if there is a car over then close the cells in list
+		self.occupation=0
+		self.exponentialOccupation=0
+		self.exponentialLastT=0
 
 	def add_neighbor(self, neighbor):
 		self.neighbors.append(neighbor)
@@ -248,9 +297,9 @@ class Cell:
 			else:
 				r=1
 		
-		if cell.t==city.t+1:
+		if cell.t==city.t and cell.car==None:
 			r=3
-		if cell.car!=None:
+		if cell.car!=None: # and cell.car.id==24:
 			r=5
 		if cell.cs!=None:
 			r=4
@@ -259,17 +308,26 @@ class Cell:
 		if 0<len(city.cars) and city.cars[0].target==cell:
 			r=3
 
+		# artificial origin of semaphores to test location
+		# if 0<len(cell.semaphore):
+		# 	r=3
+
 		return r
 
-Street = namedtuple('Street', ['path', 'velocity','lames'])
-Street.__doc__="""
-Street is used as sugar syntax to define a street.
+class Street:
+	"""
+	Street is used as sugar syntax to define a street.
 
-Attributes:
-	path (List[tuple]): List of points of the street
-	velocity (int): Velocity of the street
-	lames (int): Number of lames of the street
-"""
+	Attributes:
+		path (List[tuple]): List of points of the street
+		velocity (int): Velocity of the street
+		lanes (int): Number of lanes of the street
+	"""
+	def __init__(self, path, velocity, lanes, csUbicationable=False):
+		self.path = path
+		self.velocity = velocity
+		self.lanes = lanes
+		self.csUbicationable = csUbicationable
 
 class Block:
 	"""
@@ -279,24 +337,47 @@ class Block:
 	The construction is a list of streets that is rotated 90 degrees to fill the mosaique of the block.
 	"""
 
-	def __init__(self):
+	def __init__(self,p):
+		self.p=p
 		r = 1
 		self.lanes=[]
 		self.velocities=[]
+		self.csUbicable=[]
 		self.sugar(
-			Street([ (-1,3), (3,3), (3,-1) ], 1,1), # Rotonda
+			Street([ (-1,3), (3,3), (3,-1) ], 1,2), # Rotonda
 			# parametrizable
-			#Street([(r,3), (r,-1)],1,2), # Cruce
+			#Street([(r,3), (r,-1)],1,2), # Roundabout
 			#Street([(-1,r),(3,r)],1,2),
 
-			Street([(r,47),(r,3)],2,2), # Avenidas
-			Street([(3,r),(47,r)],2,2), 
+			Street([(r,47),(r,3)],2,3,False), # Avenues
+			Street([(3,r),(47,r)],2,3), 
 
-			Street([(47,15),(r+1-1,15)],1,1), # Calles #incorporación
-			Street([(r+1-1,36), (47,36) ],1,1), #salida 			
-			Street([ (15,r+1-1), (15,47) ],1,1),
-			Street([ (36,47), (36,r+1-1), ],1,1),
+			Street([(47,15),(r+1-1,15)],1,1,True), # Calles #incorporación
+			Street([(r+1-1,36), (47,36) ],1,1,True), 			
+			Street([ (15,r+1-1), (15,47) ],1,1,True),
+			Street([ (36,47), (36,r+1-1), ],1,1,True),
+
+			# Street([(r+1-1,15),(47,15)],1,1), # inverse the direction
+			# Street([(47,36),(r+1-1,36)  ],1,1), 
+			# Street([(15,47), (15,r+1-1)  ],1,1),
+			# Street([(36,r+1-1), (36,47)  ],1,1),
+
 		)
+		self.semaphores=[]
+		self.laneWithCS=7
+		self.numberOfCS=0
+		# self.semaphores=[
+		# 	(2,3,1,4),
+		# 	(3,3,2,4),
+		# ]
+		# self.semaphores=[
+		# 	(0,3,1,4),
+		# 	(1,3,2,4),
+		# ]
+		# self.semaphores=[ # peor que autosemaforo
+		# 	(-1,3,1,4),
+		# 	(0,3,2,4),
+		# ]
 
 		max_width = 0
 		max_height = 0
@@ -308,8 +389,26 @@ class Block:
 					max_height = point[1]
 		self.width = (max_width+1)*2
 		self.height = (max_height+1)*2
+		self.ubiqueCSRest=0
 
-	def pathPlusLame(self,path,lame):
+	def semaphore(self,grid,x,y):
+		''' 
+		If a car stays in (x1,y1) then the semaphore is red in (x2,y2)
+		'''
+		def semaphore2(x1,y1,x2,y2):
+			presed=grid.grid[(y1+y)%grid.heigh,(x1+x)%grid.width]
+			inred=grid.grid[(y2+y)%grid.heigh,(x2+x)%grid.width]
+			presed.semaphore.append(inred)
+			if len(presed.semaphore)!=1:
+				print("Error: semaphore")
+
+		# for x1,y1,x2,y2 in self.semaphores:
+		# 	semaphore2(x1+1,y1+1,x2+1,y2+1)
+		# 	semaphore2(y1+1,-x1-1,y2+1,-x2-1)
+		# 	semaphore2(-x1-1,-y1-1,-x2-1,-y2-1)
+		# 	semaphore2(-y1-1,x1+1,-y2-1,x2+1)
+
+	def pathPluslane(self,path,lane):
 		name=["" for i in range(len(path))]
 		for i in range(len(path)-1):
 			source=path[i]
@@ -346,28 +445,42 @@ class Block:
 		newPath=[]
 		for i,p in enumerate(path):
 			delta=switch[name[i]]
-			newPath.append((p[0]+delta[0]*lame,p[1]+delta[1]*lame))
+			newPath.append((p[0]+delta[0]*lane,p[1]+delta[1]*lane))
 		return newPath
 
 	def sugar(self,*streets):
 		for street in streets:
-			for lame in range(street.lames):
-				self.lanes.append(self.pathPlusLame(street.path,lame))
+			for lane in range(street.lanes):
+				self.lanes.append(self.pathPluslane(street.path,lane))
 				self.velocities.append(street.velocity)
+				self.csUbicable.append(street.csUbicationable)
 
-	def draw2(self,grid,lastx,lasty,xx,yy,velocity):
+	def draw2(self,grid,lastx,lasty,xx,yy,velocity,csUbicationable):
 		if lastx is None:
 			return
 		if lasty is None:
 			return
 		last=None
+
+	
+		used=False
+			
+		def csUbication(current):
+			nonlocal used
+			if 0<=self.ubiqueCSRest and csUbicationable and not used:
+				current.cs=ChargingStation(self.p,grid,current)
+				grid.cs.append(current.cs)
+				self.ubiqueCSRest-=1
+				used=True
+
 		if lastx == xx:
 			inc = -1
 			if lasty < yy:
 				inc = 1
 			for i in range(lasty,yy+inc,inc):
 				current=grid.grid[i%grid.heigh,xx%grid.width]
-				grid.link(last,current,velocity)
+				# csUbication(current)
+				grid.link(last,current,velocity)			
 				last=current
 				yield
 		if lasty == yy:
@@ -376,29 +489,36 @@ class Block:
 				inc = 1
 			for i in range(lastx,xx+inc,inc):
 				current=grid.grid[yy%grid.heigh,i%grid.width]
+				# csUbication(current)
 				grid.link(last,current,velocity)
 				last=current
 				yield
+		used=False
+		csUbication(current)
 
 	def draw(self,grid,x,y):
+		self.ubiqueCSEach=self.p.numberStationsPerBlock/len(self.lanes)
 		for i,lane in enumerate(self.lanes):
+			self.ubiqueCSRest+=self.ubiqueCSEach
+			csUbicationable=self.csUbicable[i]
 			lastx=None
 			lasty=None
 			for point in lane:
 				xx=x+point[0]+1
 				yy=y+point[1]+1
 				#grid.grid[xx][yy].state=Cell.STREET
-				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i]):
+				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i],csUbicationable):
 					yield
 				lastx=xx
 				lasty=yy
+
 			lastx=None
 			lasty=None
 			for point in lane:
 				xx=x+point[1]+1
 				yy=y-point[0]-1
 				#grid.grid[x+point[1]+1,y-point[0]-1].state=Cell.STREET
-				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i]):
+				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i],csUbicationable):
 					yield
 				lastx=xx
 				lasty=yy
@@ -408,7 +528,7 @@ class Block:
 				xx=x-point[0]-1
 				yy=y-point[1]-1
 				#grid.grid[x-point[0]-1,y-point[1]-1].state=Cell.STREET
-				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i]):
+				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i],csUbicationable):
 					yield
 				lastx=xx
 				lasty=yy
@@ -418,10 +538,12 @@ class Block:
 				xx=x-point[1]-1
 				yy=y+point[0]+1
 				#grid.grid[x-point[1]-1,y+point[0]+1].state=Cell.STREET
-				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i]):
+				for _ in self.draw2(grid,lastx,lasty,xx,yy,self.velocities[i],csUbicationable):
 					yield
 				lastx=xx
 				lasty=yy
+		if 0<self.ubiqueCSRest:
+			print("There are more CS than expected to ubicate")
 		
 # separable interfaz y modelo
 class City:
@@ -430,11 +552,10 @@ class City:
 	generators are used to draw the buildings of the city and the simulation. It uses the yield instruction.
 	Yield can stop the execution of the container function and can be used recursively.
 	"""
-	def __init__(self,p, block):
-		
+	def __init__(self,p):		
 		self.p=p
-		self.block=block
-		self.grid=Grid(p.verticalBlocks*block.height,p.horizontalBlocks*block.width)
+		self.block=Block(p)
+		self.grid=Grid(p.verticalBlocks*self.block.height,p.horizontalBlocks*self.block.width)
 
 		self.t=0
 
@@ -472,7 +593,20 @@ class City:
 
 		img = ax.imshow(np.vectorize(extract_color)(self.g.grid), interpolation='nearest', cmap=cmap, norm=norm)
 		self.ani = animation.FuncAnimation(fig, self.update, fargs=(img, self.g.grid, self.g.heigh,self.g.width, ), frames=50,interval=1)
+
+		def on_click(event):
+			# Evento al hacer click
+			x, y = int(event.xdata), int(event.ydata)  # Convertir las coordenadas a enteros para obtener la posición en la matriz
+			print(f"X: {x}, Y: {y}")
+			car=self.g.grid[y,x].car
+			if car!=None:
+				print("id car",car.id)
+
+		fig.canvas.mpl_connect('button_press_event', on_click)
+
 		plt.show(block=block)
+
+
 
 	def runWithoutPlot(self, times):
 		initial_time = time.time()
@@ -540,6 +674,7 @@ class City:
 								yieldI=0
 								yield
 							yieldI+=1
+					self.block.semaphore(self.grid,i*self.block.height+self.block.height//2,j*self.block.width+self.block.width//2)
 
 			#numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
 			numberCars=self.p.numberCars
@@ -547,14 +682,17 @@ class City:
 			numberChargingPerStation=self.p.numberChargingPerStation
 
      		# Put cs (Charge Stations)
-			self.cs=[]
-			for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
-				self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
-				if p.viewDrawCity:
-					if yieldCada<=yieldI:
-						yieldI=0
-						yield
-					yieldI+=1
+			# self.cs=[]
+			# for _ in range(numberStations): #*self.verticalBlocks*self.horizontalBlocks): # number of cs
+			# 	self.cs.append(ChargingStation(self.p,self.grid,self.grid.randomStreet(),numberChargingPerStation))
+			# 	#if p.viewDrawCity:
+			# 	yieldCada=1
+			# 	if yieldCada<=yieldI:
+			# 		yieldI=0
+			# 		yield
+			# 	yieldI+=1
+			for cs in self.grid.cs:
+				cs.insertInRouteMap()
 
 
 			# Orden and filter cs by p.opmitimizeCSSearch
@@ -565,8 +703,8 @@ class City:
 
 			# Put cars
 			self.cars=[]
-			for _ in range(numberCars): # number of cars
-				self.cars.append(Car(self.p,self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
+			for id in range(numberCars): # number of cars
+				self.cars.append(Car(self.p,id,self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
 				if p.viewDrawCity:
 					if yieldCada<=yieldI:
 						yieldI=0
@@ -593,22 +731,22 @@ class City:
 						if firstTime:
 							if car.priority<0:
 								car.priority=-car.priority
-							car.queda=car.cell.velocity
+							car.submove=car.cell.velocity
 
 						if car.priority==goPriority:
 							car.moveCar(self.t)
-						if car.priority<minPriority and 0<=car.priority:
+						if car.priority<minPriority and 0<car.priority:
 							minPriority=car.priority
 						if maxPriority<car.priority:
 							maxPriority=car.priority
 							
 					firstTime=False
-					if maxPriority<0:
+					if maxPriority<=0:
 						break
 
 
-				for cs in self.cs:
-					cs.moveCS()
+				for cs in self.grid.cs:
+					cs.moveCS(self.t)
 
 				yieldCada=1
 				if yieldCada<=yieldI:
@@ -629,6 +767,7 @@ class Grid:
 	def __init__(self, heigh, width):
 		self.width = width
 		self.heigh = heigh
+		self.streets=0
 		self.intersections = []
 		initial_states = np.random.choice([Cell.FREE], width*heigh, p=[1])
 		self.grid = np.array([Cell(state) for state in initial_states]).reshape(heigh, width)
@@ -639,6 +778,7 @@ class Grid:
 				for di in [-1, 0, 1]:
 					for dj in [-1, 0, 1]:
 						self.grid[i, j].neighbors[di+1][dj+1]=self.grid[(i+di)%heigh, (j+dj)%width]
+		self.cs=[]
 	def distance(self,x0,y0,x1,y1):
 		# latince distance
 		dx = abs(x1 - x0)
@@ -659,6 +799,10 @@ class Grid:
 				return cell
 	def link(self,origin,target,velocity):
 		if origin!=None:
+			if len(target.origin)==0 and len(target.destination)==0:
+				self.streets+=1
+			if len(origin.origin)==0 and len(origin.destination)==0:
+				self.streets+=1
 			target.origin.append(origin)
 			origin.destination.append(target)
 			target.updateColor()
@@ -667,7 +811,14 @@ class Grid:
 			origin.velocity=velocity
 			if len(target.origin)>1:
 				self.intersections.append(target)
-
+			
+			#autosemaphore
+			if len(target.origin)>1:
+				#target.origin[0].semaphore.append(origin)
+				#target.origin[0].origin[0].semaphore.append(origin.origin[0])
+				for d in target.destination:
+					d.semaphore.append(origin)
+					
 class Car:
 	"""
 	The car class represents a car of the simulation. The moveCar function is the main function. 
@@ -675,7 +826,10 @@ class Car:
 	there are more than one cell (bifurcation). In this case, the car uses the A* algorithm to find the best path.
 	If the car has not enough moves to reach the target, it will try to reach the nearest CS to recharge.
 	"""
-	def __init__(self,p : Parameters, grid: Grid, cell,target):
+	def __init__(self,p,id, grid: Grid, cell,target):
+		
+
+		self.id=id
 		self.state:CarState=CarState.Driving
 
 		self.p=p
@@ -687,135 +841,216 @@ class Car:
 		self.target=target
 		self.target2=None # if need to recharge
 
-		self.queda=0
+		self.submove=0
 		# Change V2 to V3. Why use normal? A normal is a sum of uniform distributions. The normal is not limited to [0,1] but the uniform is. The normal by intervals.
 		self.moves=p.carMovesFullDeposity*random.random() 
 
 		# initial moves must be enough to reach the CS at least
-		dis,_=self.localizeCS(cell)	
+		dis,cs=self.localizeCS(cell)	
 		if self.moves<dis:
-			self.moves=dis
+			self.target2=cs.cell
+			cell.car=None
+			self.cell=cs.cell
+			self.enterOnCS()
+			#self.moves=dis
 		
-		self.toCell=None
+		self.toCell=[]
+
+		self.targets=[]
+		last=self.cell
+		for i in range(p.carSizeTarget):
+			while True:
+				cand=self.grid.randomStreet()
+				if cand!=last:
+					break
+			self.targets.append(cand)
+		self.goTargets=0
 
 	def inTarget(self,target):
 		return self.cell==target
 	
-	def localizeCS(self,cell:Cell,distance=0):
+	def localizeCS(self,cell,distance=0):
 		if cell.cs!=None:
-			return (0,cell.cs)
+			if self.p.aStarAddCSTimeSteps:
+				# Calculate the ticks (time) to attend the CS
+				return (cell.cs.TicksStepsToAttend(),cell.cs)
+			else:
+				return (0,cell.cs)
 		if len(cell.h2cs)==0:
 			if len(cell.destination)==1:
 				return self.localizeCS(cell.destination[0],distance+1)
 			else:
 				print("Error: in data structure of CS")
-		aux=cell.h2cs[0]
-		return (distance+aux.distance,aux.cs)
+		tupla=None
+		for aux in cell.h2cs:
+			cand=distance+aux.distance
+			if tupla==None or cand<tupla[0]:
+				tupla=(cand,aux.cs)
+		return tupla
+	
+		# si es por distancia, solo rellena 1
+		# aux=cell.h2cs[0]
+		# 
+		# return (distance+aux.distance,aux.cs)
 	
 	def isCharging(self):
 		return self.state==CarState.ChargingQueue or self.state==CarState.ChargingSlot
 
+	def checkLegalMove(self,cell,toCell):
+		dif=abs(self.cell.x-toCell.x)+abs(self.cell.y-toCell.y)
+		if dif!=1:
+			print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
+			print("Error in move, no neighbor")
+
+	def enterOnCS(self):
+		if not self.isCharging():
+			# enter on CS
+			self.cell.car=None
+			self.cell=None
+			cs=self.target2.cs
+			cs.queue.append(self)
+			cs.carsInCS+=1
+			self.target2.car=None
+			self.state=CarState.ChargingQueue
+
+	def calculateRoute(self,cell,t):
+		dis,ire=self.aStar(cell,self.target,t)
+
+		if len(ire)==0:
+			print("Error: in data structure of A*")
+		dis2,_=self.localizeCS(self.target)
+		if self.moves<dis+dis2:
+			self.state=CarState.ToCharging
+			# There are not enough moves, need to recharge in CS first
+			dis3,cs=self.localizeCS(cell)
+			if self.moves<dis3:
+				# There are not enough moves, event with recharge in CS
+				# In this version we allow negative moves (energy)
+				# We don't have studied the case of cars withou energy and how to recharge them
+				pass
+			ire=self.aStar(cell,cs.cell,t)[1]
+			self.target2=cs.cell
+		self.toCell=ire
+
 	def moveCar(self,t):
 		if self.inTarget(self.target):
-			self.target=self.grid.randomStreet()
+			if self.state==CarState.Destination:
+				self.target=self.targets[self.goTargets]
+				self.goTargets=(self.goTargets+1)%len(self.targets)
+			else:
+				self.state=CarState.Destination
+				self.cell.t=t
+				return 
 		if self.inTarget(self.target2):
 			# There is no error if pass over target2, because target2 is only set when there is need to recharge	
-			if not self.isCharging():
-				# enter on CS
-				cs=self.target2.cs
-				self.target2.cs.queue.append(self)
-				self.target2.cs.carsInCS+=1
-				self.target2.car=None
-				self.state=CarState.ChargingQueue
+			self.enterOnCS()
 			return
 		
 		cell=self.cell
-		
-		toCell=self.toCell
-		if toCell==None:
-			toCell=cell
-		else:
-			if toCell.t==t or toCell.car!=None: 
-				self.state=CarState.Waiting
-				self.priority=-abs( self.priority)
-				return
 
-		cell.t=t
+		def calculateNext(toCell):
+			self.calculateRoute(toCell,t)
+
+		if 1==len(cell.destination):
+			toCell=cell.destination[0]
+		elif 0<len(self.toCell):
+			toCell=self.toCell.pop(0)
+		else:
+			calculateNext(cell)
+			toCell=self.toCell.pop(0)
+
+		if toCell.t==t or toCell.car!=None: 
+			cell.occupation+=1
+			if 0<self.p.aStarUseCellExponentialWeight:
+				cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)
+				cell.exponentialLastT=t
+			if 1<len(cell.destination):
+				self.toCell.insert(0,toCell)
+			self.state=CarState.Waiting
+			self.priority=-abs( self.priority)
+			return
 		
+		# Execute move
+		# identifica si es ilegal, no join
+		# self.checkLegalMove(cell,toCell)
+		#print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
 		self.cell = toCell
 		cell.car = None
 		toCell.car = self
+		cell.t=t
+		cell.occupation+=1/cell.velocity
+		if 0<self.p.aStarUseCellExponentialWeight:
+			cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
+			cell.exponentialLastT=t
+		for s in cell.semaphore:
+			s.t=t
 
-		# Calculate toCell
+		# Calculate priority
 		if len(toCell.destination)==1:
-			# Calculate the index of the priority
-			self.toCell=toCell.destination[0]
+			toCell=toCell.destination[0]
 			if self.target2!=None:
 				self.state=CarState.ToCharging
 			else:
 				self.state=CarState.Driving
-			#self.priority=indexOf(toCell.destination[0].origin,toCell)
 		else:
-			dis,ire=self.aStart(toCell,self.target)
-			dis2,_=self.localizeCS(ire)
-			if self.moves<dis+dis2:
-				self.state=CarState.ToCharging
-				# There are not enough moves, need to recharge in CS first
-				dis3,cs=self.localizeCS(toCell)
-				if self.moves<dis3:
-					# There are not enough moves, event with recharge in CS
-					#return False
-					pass
-				ire=self.aStart(toCell,cs.cell)[1]
-				self.target2=cs.cell
-			else:
-				self.state=CarState.Driving
-			# if ire.t==t or ire.car!=None:
-			# 	return False
-			self.toCell=ire
-		
-		self.priority=self.toCell.origin.index(toCell)+1
+			if len(self.toCell)==0:
+				calculateNext(toCell)
+			toCell=self.toCell[0]
+	
+		if not self.cell in toCell.origin:
+			self.checkLegalMove(self.cell,toCell)
+			print("Next error")
+		self.priority=toCell.origin.index(self.cell)+1
 
+		# Update energy (moves) and sub-moves (velocity)
 		self.moves-=1
-		self.queda-=1
-		if self.queda==0:
+		self.submove-=1
+		if self.submove==0:
+			#print("End")
+			# negative priority is used to indicate that the car finished the submove
 			self.priority=-abs(self.priority)
 
-	def aStart(self,cell:Cell,target:Cell):
-		return getattr(self,"aStart"+self.p.aStarMethod)(cell,target)
+	def aStar(self,cell:Cell,target:Cell,t):
+		return getattr(self,"aStar"+self.p.aStarMethod)(cell,target,t)
 
-	def aStartDistance(self,cell:Cell,target:Cell):
+	def aStarDistance(self,cell:Cell,target:Cell,t):
 		# Distance version
 		# only mark visited if it has more than one destination
 		visited=set()
 		visited.add(cell)
 		opened={}
 		for d in cell.destination:
-			opened[d]=d
+			if len(cell.destination)==1:
+				opened[d]=[]
+			else:
+				opened[d]=[d]
 		opened2={}
 		distancia=1
 
 		while True:
 			# solo se añaden los visited con mas de uno
 			for (o,r) in opened.items():
-				if o==target:
-					return (distancia,opened[o])
 				if len(o.destination)==1:
 					opened2[o.destination[0]]=r
 				else:
 					if o not in visited:
 						visited.add(o)
 						for d in o.destination:
-							opened2[d]=r
+							r2=r.copy()
+							r2.append(d)
+							opened2[d]=r2
+				if o==target:
+					return (distancia,opened[o])
 			opened=opened2
 			opened2={}
 			distancia+=1
 
-	def aStartTime(self,cell:Cell,target:Cell):
+	def aStarTime(self,cell:Cell,target:Cell,t):
 		# Time version
 		visited={}
 		opening=[TimeNode(self.p,i) for i in range(self.p.aStarDeep)]
 		opening[0].setCell(self.grid,cell,target,0)
+		opening[0].decision=[]
 
 		def selectBest():
 			'''
@@ -870,10 +1105,23 @@ class Car:
 					worst.backup() 
 
 					worst.setCell(self.grid,d,target,best.distance+1)
-					worst.time=best.time+1/best.cell.velocity
-					worst.decision=best.decision
-					if best.time==0: # first move, memorize decision
-						worst.decision=d
+					if self.p.aStarUseCellAverageVelocity and 0<cell.t:
+						if 0<self.p.aStarUseCellExponentialWeight:
+							worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+						else:
+							worst.time=best.time+cell.occupation/cell.t
+					else:
+						worst.time=best.time+1/best.cell.velocity
+					if 0<self.p.aStarAddRoadCarAsTimeSteps and best.cell.car!=None:
+						worst.time+=self.p.aStarAddRoadCarAsTimeSteps
+
+					# clone copy of decision list
+					worst.decision=best.decision.copy()
+					# if d comes from a bifurcation add
+
+					if len(best.cell.destination)>1 and len(worst.decision)<self.p.aStarCalculateEach:
+						worst.decision.append(d)
+					
 					worst.undoBackupIfWorst()
 			# free best
 			best.cell=None
@@ -900,6 +1148,9 @@ class Car:
 			#  	return best.distance,best.decision
 
 class TimeNode:
+	'''
+	Used by A* algorithm. It is a node of the A* tree.
+	'''
 	def __init__(self,p,id):
 		self.p=p
 		self.id=id
@@ -933,6 +1184,7 @@ class TimeNode:
 
 class Stats:
 	def __init__(self,p):
+		self.p=p
 		self.carStateFile=None
 		self.carStateFileName=p.statsFileName
 		if p.statsFileName=="":
@@ -982,29 +1234,28 @@ class Stats:
 			plt.fill_between(x, prev_values, current_values, label=f'{value.name}')
 			prev_values = current_values
 
-		plt.xlabel('Time')
-		plt.ylabel('Number of Occurrences')
-		plt.title('Distribution of values over time')
+		plt.xlabel('Time Steps')
+		plt.ylabel('Number of Vehicles')
+
+		# Put in title verticalBlocks, horizontalBlocks, aStarMethod and aStarAddCSTimeSteps
+		plt.title(f'{self.p.verticalBlocks}x{self.p.horizontalBlocks} {self.p.numberCars} cars {self.p.aStarMethod} {"Road" if 0<self.p.aStarAddRoadCarAsTimeSteps else ""} {"CS" if self.p.aStarAddCSTimeSteps else ""}')
 		#plt.xticks(ticks=range(len(data_over_time)), labels=[f'{i+1}' for i in range(len(data_over_time))])
 		plt.legend(loc='lower left')  
 
+		plt.savefig(self.p.statsFileName+".eps" , format='eps', dpi=300)
+		plt.savefig(self.p.statsFileName+".pdf" , format='pdf', dpi=300)
 		plt.show()
 		print()
 
-
-
 if __name__ == '__main__':
 	p=Parameters()
-	block=Block()
-	city=City(p,block)
-	initialTime=time.time()
+	city=City(p)
 	#city.shell()
-	# city.plot(True)
-	city.runWithoutPlot(100000)
+
+	city.plot(True)
+	city.runWithoutPlot(1000)
 	city.stats.carStateFile.close()
-	# print("Time: ",int(round(time.time()-initialTime),"s"))
-	# city.stats.plot()
+	#city.stats.plot()
 
 	stats=Stats(p)
 	stats.plot()
-	
