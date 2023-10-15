@@ -34,21 +34,23 @@ class Parameters:
 		self.verticalBlocks=3
 		self.horizontalBlocks=3
 		self.numberBlocks=self.verticalBlocks*self.horizontalBlocks
-		self.numberStationsPerBlock=4# tipical 1/(numberBlocks), 1, 4
+		self.numberStationsPerBlock=1# tipical 1/(numberBlocks), 1, 4
 
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
 		
 		self.percentageEV=1.0
 
-
+		self.densityCars=0.1
 		self.carMovesFullDeposity=27000
 		self.stepsToRecharge=960 
-		self.carRechargePerTic=self.stepsToRecharge/960
+		self.carRechargePerTic=self.carMovesFullDeposity/self.stepsToRecharge
 
 		self.introduceCarsInCSToStacionaryState=True
 
 		# A* optimization
 		self.opmitimizeCSSearch=3 # bigger is more slow
+		self.aStarDeep=100 # Number of positions to search in the aStar algorithm
+		self.aStarRemainderWeight=2 #* weight of lineal distance to target to time
 
 		# A* optimization Time
 		self.aStarCalculateEach=10 # The aStar calculation is slow, so we can calculate it each n bifurcation cells
@@ -63,15 +65,13 @@ class Parameters:
 		# when aStarMethod is Time
 		self.aStarAddRoadCarAsTimeSteps=0
 		self.aStarUseCellAverageVelocity=True # false=time of the street. works in combination with aStarUseCellExponentialWeight
-		self.aStarUseCellExponentialWeight=0.95 # 0 disable, 0-1 weight of old velocity data
-		self.aStarDeep=100 # Number of positions to search in the aStar algorithm
-		self.aStarRemainderWeight=2 #math.sqrt(2) # weight of lineal distance to target to time
+		self.aStarUseCellExponentialWeight=0.95 #* 0 disable, 0-1 weight of old velocity data
 		# self.aStarStepsPerCar=100000 # bigger is more slow, more precision
 
 		# interface parameters
 		self.viewWarning = True
 		self.viewDrawCity = False
-		self.statsFileName="/Users/drdj/Library/Mobile Documents/com~apple~CloudDocs/sanevec/stats_" # if "" then not save / stats1
+		self.statsFileName="data/stats_" # if "" then not save / stats1
 
 	def clone(self):
 		"""
@@ -753,8 +753,8 @@ class City:
 				carInCS+=1
 
 		if self.p.viewWarning:
-			if self.p.numberStations<equilibrium:
-				print("Warning: Insufficient number of CSs")
+			#if self.p.numberStations<equilibrium:
+			print("Number of chargers:",self.p.numberChargingPerStation)
 
 	def generator(self):
 		try:
@@ -779,10 +779,12 @@ class City:
 			# medium velocity of cells in the city
 			p.mediumVelocity=self.grid.totalVelocity/self.grid.streets
 
-
-			p.numberChargers=p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic*p.energy
+			p.numberChargers=p.numberChargersPerBlock*p.numberBlocks
+			#p.numberChargers=p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic*p.energy
+			p.energy=p.numberChargers/(p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic)
+			print("energy",p.energy)
 			
-			p.numberChargersPerBlock=p.numberChargers/p.numberBlocks
+			#p.numberChargersPerBlock=p.numberChargers/p.numberBlocks
 			p.numberChargingPerStation=p.numberChargers//p.numberStations
 
 
@@ -1551,9 +1553,11 @@ class Stats:
 		# plt.ylabel('Number of Vehicles')
 
 		# Put in title verticalBlocks, horizontalBlocks, aStarMethod and aStarCSWeb
-		plt.title(self.p.legendName)
+		#plt.title(self.p.legendName)
 		#plt.xticks(ticks=range(len(data_over_time)), labels=[f'{i+1}' for i in range(len(data_over_time))])
-		plt.legend(loc='lower left')  
+		#plt.legend(loc='lower left')  
+		plt.legend(loc='lower right')#, bbox_to_anchor=(1, 1.05))
+
 
 		plt.savefig(self.p.statsFileName+self.p.fileName+"_csqueue.eps" , format='eps', dpi=300)
 		plt.savefig(self.p.statsFileName+self.p.fileName+"_csqueue.pdf" , format='pdf', dpi=300)
@@ -1586,9 +1590,10 @@ class Stats:
 		plt.ylabel('Number of Vehicles')
 
 		# Put in title verticalBlocks, horizontalBlocks, aStarMethod and aStarCSWeb
-		plt.title(self.p.legendName)
+		#plt.title(self.p.legendName)
 		#plt.xticks(ticks=range(len(data_over_time)), labels=[f'{i+1}' for i in range(len(data_over_time))])
-		plt.legend(loc='lower left')  
+		#plt.legend(loc='lower left')  
+		plt.legend(loc='lower right')#, bbox_to_anchor=(1, 1.05))
 
 		plt.savefig(self.p.statsFileName+self.p.fileName +"_carstate.eps" , format='eps', dpi=300)
 		plt.savefig(self.p.statsFileName+self.p.fileName+"_carstate.pdf" , format='pdf', dpi=300)
@@ -1600,23 +1605,33 @@ class Stats:
 def cartesianExperiment():
 	p=Parameters()
 	ps=p.metaExperiment(
-		densityCars=[0.01,0.05,0.1],
-		energy=[1,0.5,0.01],
-		aStarMethod=["Time","Distance"],
-		aStarCSWev=[0,1,0.5],
+		#energy=[0.15,0.3,0.45,0.6,0.75,0.9],
+		numberChargersPerBlock=[1,5,10],
+		aStarMethod=["Distance","Time"],
+		aStarCSWeb=[0,0.25,0.5,0.75,1], 
+		densityCars=[0.05,0.1],
+		aStarUseCellExponentialWeight=[0.95,0.5],
 		#reserveCS=[False], # it has been removed because legend is too long
 	)
-	return ps
+	ps2=[]
+	for p in ps:
+		ok=True
+		if p.aStarMethod=="Distance":
+			if p.aStarCSWeb!=0:
+				ok=False
+			if p.aStarUseCellExponentialWeight!=0.95:
+				ok=False
+		if ok:
+			ps2.append(p)
+	return ps2
 
 def experiment(i):
 	p=cartesianExperiment()[i]
 
 	city=City(p)
-	#city.shell()
 
-	city.plot(True)
+	#city.plot(True)
 	city.runWithoutPlot(1000)
-	#city.stats.plot()
 
 	stats=Stats(p)
 	stats.plotCS(False)
@@ -1624,7 +1639,7 @@ def experiment(i):
 
 if __name__ == '__main__':
 	start_time = time.time()  
-	experiment(1)
+	#experiment(0)
 	ps = cartesianExperiment()
 	num_processors = multiprocessing.cpu_count()
 
