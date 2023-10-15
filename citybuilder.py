@@ -10,6 +10,8 @@ import math
 from enum import IntEnum
 import json
 import time
+import copy
+import multiprocessing
 
 random.seed(0) # To reproduce the same simulation, comment this line to get a random simulation
 
@@ -29,42 +31,93 @@ class Parameters:
 		viewDrawCity (bool): If true, draw the city
 	"""
 	def __init__(self):
-		self.verticalBlocks=1
-		self.horizontalBlocks=1
-		self.numberStationsPerBlock=4# tipical 1/(vb*hb),1, 4 
-		self.numberChargersPerBlock=8
-
+		self.verticalBlocks=3
+		self.horizontalBlocks=3
 		self.numberBlocks=self.verticalBlocks*self.horizontalBlocks
+		self.numberStationsPerBlock=4# tipical 1/(numberBlocks), 1, 4
+
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
-		self.numberChargers=self.numberChargersPerBlock*self.numberBlocks
-		self.numberChargingPerStation=self.numberChargers//self.numberStations
-		self.numberCars=10
-		# to allow to move all cars at medium velocity
-		self.mediumVelocity=2
-		self.carRechargePerTic=self.numberCars*self.mediumVelocity/self.numberChargers
+		
+		self.percentageEV=1.0
 
 
 		self.carMovesFullDeposity=27000
+		self.stepsToRecharge=960 
+		self.carRechargePerTic=self.stepsToRecharge/960
 
+		self.introduceCarsInCSToStacionaryState=True
 
+		# A* optimization
 		self.opmitimizeCSSearch=3 # bigger is more slow
-		self.carSizeTarget=20
+
+		# A* optimization Time
+		self.aStarCalculateEach=10 # The aStar calculation is slow, so we can calculate it each n bifurcation cells
+		self.aStarTimeOutCacheBifulcation=10 # In the bifulcation cell the calculos of time to CS is valid for n tics
+
+		self.carSizeTarget=20 # The target of each car is a secuence of random cells. This parameter is the size of the secuence
 
 		self.aStarMethod="Time" # Time or Distance
-		self.aStarAddCSTimeSteps=False
+		self.aStarRandomCS=False
+		self.aStarCSWeb=0.5 # percentage of EV than use the web to see the queue of the CS (time)
 
 		# when aStarMethod is Time
 		self.aStarAddRoadCarAsTimeSteps=0
-		self.aStarUseCellAverageVelocity=True
-		self.aStarUseCellExponentialWeight=0.5 # 0 disable, 0-1 weight of old velocity data
-		self.aStarCalculateEach=5 # The aStar calculation is slow, so we can calculate it each n bifurcation cells
-		self.aStarDeep=100 # bigger is more slow, more precision
+		self.aStarUseCellAverageVelocity=True # false=time of the street. works in combination with aStarUseCellExponentialWeight
+		self.aStarUseCellExponentialWeight=0.95 # 0 disable, 0-1 weight of old velocity data
+		self.aStarDeep=100 # Number of positions to search in the aStar algorithm
 		self.aStarRemainderWeight=2 #math.sqrt(2) # weight of lineal distance to target to time
 		# self.aStarStepsPerCar=100000 # bigger is more slow, more precision
 
 		# interface parameters
-		self.viewDrawCity=False
-		self.statsFileName="stats1" # if "" then not save / stats1
+		self.viewWarning = True
+		self.viewDrawCity = False
+		self.statsFileName="/Users/drdj/Library/Mobile Documents/com~apple~CloudDocs/sanevec/stats_" # if "" then not save / stats1
+
+	def clone(self):
+		"""
+		Creates a deep copy of the Parameters object.
+		"""
+		return copy.deepcopy(self)
+	
+	def metaExperiment(self,**m):
+		"""
+		Take a map [parameter] -> [values] and generte al cartesian product of the values.
+		"""
+		# generate an array of index
+		index=[0]*len(m)
+		keys=list(m.keys())
+		r=[] # result
+		end=False
+		while True:
+			# r.append(index.copy())
+			p=self.clone()
+			p.fileName=""
+			p.legendName=""
+			for i in range(len(index)):
+				setattr(p,keys[i],m[keys[i]][index[i]])
+				p.fileName=p.fileName+keys[i]+str(m[keys[i]][index[i]])+"_"
+				p.legendName=p.legendName+keys[i]+":"+str(m[keys[i]][index[i]])+" "
+			# remove last character
+			p.fileName=p.fileName[:-1]
+			p.legendName=p.legendName[:-1]
+			r.append(p)
+
+			i=0 # index to increment
+			while True:
+				if i==len(index):
+					end=True
+					break
+				index[i]+=1
+				# if reseach the end of the array
+				size=len(m[keys[i]])
+				if index[i]==size:
+					index[i]=0
+					i+=1
+				else:
+					break
+			if end:
+				break
+		return r
 
 class CarPriority(IntEnum):
 	'''
@@ -84,9 +137,16 @@ class CarState(IntEnum):
 	Destination = 0
 	Waiting = 1
 	Driving = 2
-	ToCharging = 3
-	ChargingQueue = 4
-	ChargingSlot = 5
+	Charging = 3
+	Queueing = 4
+	ToCharging = 5
+
+class CarType(IntEnum):
+	'''
+	The EV type go to charging station when the battery is low. 
+	'''
+	EV = 0
+	ICEV = 1
 
 class ChargingStation:
 	"""
@@ -108,13 +168,15 @@ class ChargingStation:
 		self.cell=cell
 		cell.cs=self
 		# Note: factorizable
-		numberCharging=int(p.numberChargingPerStation)
-		self.numberCharging=numberCharging
 		self.queue=[]
-		self.car=[None for i in range(numberCharging)]
 		self.carsInCS=0
 
 		#self.insertInRouteMap(cell)
+	def createChargins(self):
+		p=self.p
+		numberCharging=int(p.numberChargingPerStation)
+		self.numberCharging=numberCharging
+		self.car=[None for i in range(numberCharging)]
 
 	def TicksStepsToAttend(self):
 		total=0
@@ -132,7 +194,7 @@ class ChargingStation:
 			car=self.queue.pop(0)
 			i=self.car.index(None)
 			self.car[i]=car
-			car.state=CarState.ChargingSlot
+			car.state=CarState.Charging
 
 		# Recharge the cars that are in the charger
 		candidateToLeave=-1
@@ -236,6 +298,8 @@ class Cell:
 		self.car=None
 		self.cs=None
 		self.t=0
+		self.tCache=0 # time in with cached is calculated
+		self.timeCache=None # time of the calculation
 		self.semaphore=[] # if there is a car over then close the cells in list
 		self.occupation=0
 		self.exponentialOccupation=0
@@ -300,7 +364,10 @@ class Cell:
 		if cell.t==city.t and cell.car==None:
 			r=3
 		if cell.car!=None: # and cell.car.id==24:
-			r=5
+			if cell.car.p.type==CarType.EV:
+				r=5
+			else:
+				r=6
 		if cell.cs!=None:
 			r=4
 		
@@ -344,15 +411,15 @@ class Block:
 		self.velocities=[]
 		self.csUbicable=[]
 		self.sugar(
-			Street([ (-1,3), (3,3), (3,-1) ], 1,2), # Rotonda
+			Street([ (-1,3), (3,3), (3,-1) ], 1,2), # roundabout
 			# parametrizable
-			#Street([(r,3), (r,-1)],1,2), # Roundabout
+			#Street([(r,3), (r,-1)],1,2), # cross
 			#Street([(-1,r),(3,r)],1,2),
 
-			Street([(r,47),(r,3)],2,3,False), # Avenues
-			Street([(3,r),(47,r)],2,3), 
+			Street([(r,47),(r,3)],2,2,False), # Avenues
+			Street([(3,r),(47,r)],2,2), 
 
-			Street([(47,15),(r+1-1,15)],1,1,True), # Calles #incorporación
+			Street([(47,15),(r+1-1,15)],1,1,True), # Streets #incorporación
 			Street([(r+1-1,36), (47,36) ],1,1,True), 			
 			Street([ (15,r+1-1), (15,47) ],1,1,True),
 			Street([ (36,47), (36,r+1-1), ],1,1,True),
@@ -583,8 +650,8 @@ class City:
 	def plot(self,block=False):
 		fig, ax = plt.subplots()
 
-		bounds = [0, 1, 2, 3, 4, 5, 6]
-		cmap = colors.ListedColormap(['black',  'green', 'blue','red', 'yellow', 'white'])
+		bounds = [0, 1, 2, 3, 4, 5, 6, 7]
+		cmap = colors.ListedColormap(['black',  'green', 'blue','red', 'yellow', 'white','orange'])
 		norm = colors.BoundaryNorm(bounds, cmap.N)
 	
 
@@ -628,7 +695,8 @@ class City:
 			except StopIteration:
 				print("\ncity_generator has no more items to generate.")
 				break
-		print()  # Para un salto de línea final después de que el ciclo se complete
+		print() 
+		self.stats.close()
 		
 	
 	def update(self,frameNum, img, grid, heigh, width):
@@ -658,6 +726,35 @@ class City:
 		img.set_data(newGrid)
 		return img,
 
+	def introduceCarsInCSToStacionaryState(self):
+		if not self.p.introduceCarsInCSToStacionaryState:
+			return
+		# count cars in cs
+		carInCS=0
+		for car in self.cars:
+			if car.isCharging():
+				carInCS+=1
+		# calculate equilibrium of cars in cs in energy terms
+		percentageCarsInCS=1/(self.p.carRechargePerTic/self.p.mediumVelocity+1)
+		equilibrium=self.p.numberCars*percentageCarsInCS
+		# move cars to equilibrium number
+		while carInCS<equilibrium:
+			# get random car
+			car=self.cars[random.randint(0,len(self.cars)-1)]
+			# if car is not in cs
+			if not car.isCharging():
+				# move car to cs
+				cell=car.cell
+				_,_,cs=car.localizeCS(cell,self.t)	
+				car.target2=cs.cell
+				cell.car=None
+				car.cell=cs.cell
+				car.enterOnCS()
+				carInCS+=1
+
+		if self.p.viewWarning:
+			if self.p.numberStations<equilibrium:
+				print("Warning: Insufficient number of CSs")
 
 	def generator(self):
 		try:
@@ -669,17 +766,32 @@ class City:
 			for i in range(self.p.verticalBlocks):
 				for j in range(self.p.horizontalBlocks):
 					for _ in self.block.draw(self.grid,i*self.block.height+self.block.height//2,j*self.block.width+self.block.width//2):
-						if p.viewDrawCity:
+						if self.p.viewDrawCity:
 							if yieldCada<=yieldI:
 								yieldI=0
 								yield
 							yieldI+=1
 					self.block.semaphore(self.grid,i*self.block.height+self.block.height//2,j*self.block.width+self.block.width//2)
 
+			# Parameters that depend on the number of streets is calculated here
+			p=self.p
+			p.numberCars=int(p.densityCars*self.grid.streets)
+			# medium velocity of cells in the city
+			p.mediumVelocity=self.grid.totalVelocity/self.grid.streets
+
+
+			p.numberChargers=p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic*p.energy
+			
+			p.numberChargersPerBlock=p.numberChargers/p.numberBlocks
+			p.numberChargingPerStation=p.numberChargers//p.numberStations
+
+
 			#numberBlocks=self.p.verticalBlocks*self.p.horizontalBlocks
 			numberCars=self.p.numberCars
 			numberStations=self.p.numberStations
 			numberChargingPerStation=self.p.numberChargingPerStation
+
+			self.stats=Stats(self.p)
 
      		# Put cs (Charge Stations)
 			# self.cs=[]
@@ -692,6 +804,7 @@ class City:
 			# 		yield
 			# 	yieldI+=1
 			for cs in self.grid.cs:
+				cs.createChargins()
 				cs.insertInRouteMap()
 
 
@@ -704,15 +817,22 @@ class City:
 			# Put cars
 			self.cars=[]
 			for id in range(numberCars): # number of cars
-				self.cars.append(Car(self.p,id,self.grid,self.grid.randomStreet(),self.grid.randomStreet()))
-				if p.viewDrawCity:
+				p2=self.p.clone()
+				if (id+1)/numberCars<self.p.percentageEV:
+					p2.type=CarType.EV
+				else:
+					p2.type=CarType.ICEV
+
+				self.cars.append(Car(p2,id,self.grid,self.grid.randomStreet(),self.grid.randomStreet(),self.t))
+				if self.p.viewDrawCity:
 					if yieldCada<=yieldI:
 						yieldI=0
 						yield
 					yieldI+=1
 
+			self.introduceCarsInCSToStacionaryState()
+
 			# Simulation
-			self.stats=Stats(self.p)
 			while True:
 				self.t+=1
 				self.stats.setT(self.t)
@@ -744,9 +864,9 @@ class City:
 					if maxPriority<=0:
 						break
 
-
-				for cs in self.grid.cs:
+				for numcs,cs in enumerate(self.grid.cs):
 					cs.moveCS(self.t)
+					self.stats.addCSQueue(numcs,len(cs.queue))
 
 				yieldCada=1
 				if yieldCada<=yieldI:
@@ -768,6 +888,7 @@ class Grid:
 		self.width = width
 		self.heigh = heigh
 		self.streets=0
+		self.totalVelocity=0
 		self.intersections = []
 		initial_states = np.random.choice([Cell.FREE], width*heigh, p=[1])
 		self.grid = np.array([Cell(state) for state in initial_states]).reshape(heigh, width)
@@ -799,10 +920,9 @@ class Grid:
 				return cell
 	def link(self,origin,target,velocity):
 		if origin!=None:
-			if len(target.origin)==0 and len(target.destination)==0:
+			if (len(target.origin)==0 and len(target.destination)==0) or (len(origin.origin)==0 and len(origin.destination)==0):
 				self.streets+=1
-			if len(origin.origin)==0 and len(origin.destination)==0:
-				self.streets+=1
+				self.totalVelocity+=velocity
 			target.origin.append(origin)
 			origin.destination.append(target)
 			target.updateColor()
@@ -826,9 +946,7 @@ class Car:
 	there are more than one cell (bifurcation). In this case, the car uses the A* algorithm to find the best path.
 	If the car has not enough moves to reach the target, it will try to reach the nearest CS to recharge.
 	"""
-	def __init__(self,p,id, grid: Grid, cell,target):
-		
-
+	def __init__(self,p,id, grid: Grid, cell,target,t):
 		self.id=id
 		self.state:CarState=CarState.Driving
 
@@ -845,8 +963,14 @@ class Car:
 		# Change V2 to V3. Why use normal? A normal is a sum of uniform distributions. The normal is not limited to [0,1] but the uniform is. The normal by intervals.
 		self.moves=p.carMovesFullDeposity*random.random() 
 
+		# A percentage of cars have CS Web
+		self.csweb=False
+		if self.id<p.aStarCSWeb*p.numberCars:
+			self.csweb=True
+
 		# initial moves must be enough to reach the CS at least
-		dis,cs=self.localizeCS(cell)	
+		dis,_,cs=self.localizeCS(cell,t)	
+
 		if self.moves<dis:
 			self.target2=cs.cell
 			cell.car=None
@@ -866,26 +990,58 @@ class Car:
 			self.targets.append(cand)
 		self.goTargets=0
 
+
 	def inTarget(self,target):
 		return self.cell==target
 	
-	def localizeCS(self,cell,distance=0):
+	def localizeCS(self,cell,t,distance=0): 
+		# return distance, timeToAttend, cs
+		if self.p.aStarRandomCS:
+			# select random CS
+			cs=random.choice(self.grid.cs) 
+			return (distance,0,cs)
 		if cell.cs!=None:
-			if self.p.aStarAddCSTimeSteps:
+			if self.csweb and self.p.aStarMethod=="Time":
 				# Calculate the ticks (time) to attend the CS
-				return (cell.cs.TicksStepsToAttend(),cell.cs)
+				return (distance,cell.cs.TicksStepsToAttend(),cell.cs)
 			else:
-				return (0,cell.cs)
+				return (distance,0,cell.cs)
 		if len(cell.h2cs)==0:
 			if len(cell.destination)==1:
-				return self.localizeCS(cell.destination[0],distance+1)
+				return self.localizeCS(cell.destination[0],t,distance+1)
 			else:
 				print("Error: in data structure of CS")
 		tupla=None
-		for aux in cell.h2cs:
+
+		if 0<self.p.aStarTimeOutCacheBifulcation:
+			getFromCache=True
+			if cell.timeCache==None:
+				cell.timeCache=[0]*len(cell.h2cs)
+				getFromCache=False
+			time=t-cell.tCache
+			if self.p.aStarTimeOutCacheBifulcation<time:
+				getFromCache=False
+		else:
+			getFromCache=False
+				
+		for ind,aux in enumerate(cell.h2cs):
 			cand=distance+aux.distance
-			if tupla==None or cand<tupla[0]:
-				tupla=(cand,aux.cs)
+			heuristic=cand
+			if self.p.aStarMethod=="Time":
+				if getFromCache:
+					heuristic=cell.timeCache[ind]
+				else:
+					heuristic,_=self.aStar(cell,aux.cs.cell,t)					
+					if 0<self.p.aStarTimeOutCacheBifulcation:
+						cell.timeCache[ind]=cand
+						cell.tCache=t
+				
+				if self.csweb:
+					heuristic+=aux.cs.TicksStepsToAttend()
+
+			#  add tickssteps to attended?
+			if tupla==None or heuristic<tupla[1]:
+				tupla=(cand,heuristic,aux.cs)
 		return tupla
 	
 		# si es por distancia, solo rellena 1
@@ -894,7 +1050,7 @@ class Car:
 		# return (distance+aux.distance,aux.cs)
 	
 	def isCharging(self):
-		return self.state==CarState.ChargingQueue or self.state==CarState.ChargingSlot
+		return self.state==CarState.Queueing or self.state==CarState.Charging
 
 	def checkLegalMove(self,cell,toCell):
 		dif=abs(self.cell.x-toCell.x)+abs(self.cell.y-toCell.y)
@@ -911,18 +1067,25 @@ class Car:
 			cs.queue.append(self)
 			cs.carsInCS+=1
 			self.target2.car=None
-			self.state=CarState.ChargingQueue
+			self.state=CarState.Queueing
+			return True
+		return False
 
 	def calculateRoute(self,cell,t):
 		dis,ire=self.aStar(cell,self.target,t)
 
+		if self.p.type==CarType.ICEV:
+			# If the car is ICEV, it will not need to recharge
+			self.toCell=ire
+			return 
+
 		if len(ire)==0:
 			print("Error: in data structure of A*")
-		dis2,_=self.localizeCS(self.target)
+		dis2,_,_=self.localizeCS(self.target,t)
 		if self.moves<dis+dis2:
 			self.state=CarState.ToCharging
 			# There are not enough moves, need to recharge in CS first
-			dis3,cs=self.localizeCS(cell)
+			dis3,_,cs=self.localizeCS(cell,t)
 			if self.moves<dis3:
 				# There are not enough moves, event with recharge in CS
 				# In this version we allow negative moves (energy)
@@ -943,8 +1106,8 @@ class Car:
 				return 
 		if self.inTarget(self.target2):
 			# There is no error if pass over target2, because target2 is only set when there is need to recharge	
-			self.enterOnCS()
-			return
+			if self.enterOnCS():
+				return
 		
 		cell=self.cell
 
@@ -1146,6 +1309,105 @@ class Car:
 			# movesToStop+=1
 			# if self.p.aStarStepsPerCar<movesToStop:
 			#  	return best.distance,best.decision
+	def aStarTime2(self,cell:Cell,target:Cell,t):
+		opening=[TimeNode(self.p,i) for i in range(self.p.aStarDeep)]
+		opening[0].setCell(self.grid,cell,target,0)
+		opening[0].decision=[]
+
+		def selectBest():
+			'''
+			If reached target we can't select
+			Only best of best is super-momorized, the others in target are destroyed
+			'''
+			bestTarget=None
+			best=None
+			for i in range(0,len(opening)):
+				if opening[i].cell==None:
+					continue
+				if opening[i].cell==target:
+					if bestTarget==None:
+						bestTarget=opening[i]
+					else:
+						if bestTarget.heuristic()>opening[i].heuristic():
+							bestTarget.cell=None
+							bestTarget=opening[i]
+					continue
+				elif best==None or opening[i].heuristic()<best.heuristic():
+					best=opening[i]
+
+			if best==None:
+				return bestTarget
+			# is valid?
+			if bestTarget!=None and bestTarget.heuristic()<best.heuristic():
+				return bestTarget
+			if best==None:
+					print("best is None")
+			return best
+
+		def selectWorst():
+			worst=None
+			for i in range(0,len(opening)):
+				if opening[i].cell==None:
+					return opening[i]
+				if worst==None or opening[i].heuristic()>worst.heuristic():
+					worst=opening[i]
+			return worst
+		
+		best=selectBest()
+		# movesToStop=0
+		#print("Target: (",target.x,",",target.y,")")
+		while True:
+			# Go through all the targets of the best
+			yet=visited.get(best.cell)
+			if yet==None or best.time<yet:
+				visited[best.cell]=best.time
+				for d in best.cell.destination:
+					# When the target is reached, it is not necessarily finished				
+					worst=selectWorst()
+					worst.backup() 
+
+					worst.setCell(self.grid,d,target,best.distance+1)
+					if self.p.aStarUseCellAverageVelocity and 0<cell.t:
+						if 0<self.p.aStarUseCellExponentialWeight:
+							worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+						else:
+							worst.time=best.time+cell.occupation/cell.t
+					else:
+						worst.time=best.time+1/best.cell.velocity
+					if 0<self.p.aStarAddRoadCarAsTimeSteps and best.cell.car!=None:
+						worst.time+=self.p.aStarAddRoadCarAsTimeSteps
+
+					# clone copy of decision list
+					worst.decision=best.decision.copy()
+					# if d comes from a bifurcation add
+
+					if len(best.cell.destination)>1 and len(worst.decision)<self.p.aStarCalculateEach:
+						worst.decision.append(d)
+					
+					worst.undoBackupIfWorst()
+			# free best
+			best.cell=None
+
+			# if reached target we can't select
+			# only best of best is super-momorized
+			best=selectBest()
+
+			#print("(",best.cell.x,",",best.cell.y,")",best.remainder)
+
+			# stops criterias:
+			# if reached target and others are worst
+			if best.cell==target:
+				stopCriteria=True
+				for d in opening:
+					if d.heuristic()<best.heuristic():
+						stopCriteria=False
+						break
+				if stopCriteria:
+					return best.distance,best.decision
+			# by number of moves
+			# movesToStop+=1
+			# if self.p.aStarStepsPerCar<movesToStop:
+			#  	return best.distance,best.decision
 
 class TimeNode:
 	'''
@@ -1182,43 +1444,129 @@ class TimeNode:
 		self.remainder=grid.distance(cell.x,cell.y,target.x,target.y)
 		self.distance=distance
 
+class TimeNode2:
+	'''
+	Used by A* algorithm. It is a node of the A* tree.
+	This is the version 2, in this version the visited is not unloaded.
+	'''
+	def __init__(self,p,id):
+		self.p=p
+		self.id=id
+		self.cell=None
+		self.time=0
+		self.parent=None
+		self.childs=0
+		self.remainder=0
+		self.distance=0
+	def backup(self):
+		self.backupCell=self.cell
+		self.backupTime=self.time
+		self.backupDecision=self.decision
+		self.backupRemainder=self.remainder
+		self.backupHeuristic=self.heuristic()
+		self.backupDistance=self.distance
+	def undoBackupIfWorst(self):
+		if self.backupCell!=None and self.heuristic()>self.backupHeuristic:
+			self.cell=self.backupCell
+			self.time=self.backupTime
+			self.decision=self.backupDecision
+			self.remainder=self.backupRemainder
+			self.distance=self.backupDistance
+	def heuristic(self):
+		if self.cell==None:
+			return math.inf
+		return self.time+self.remainder*self.p.aStarRemainderWeight
+	def setCell(self,grid:Grid,cell:Cell,target:Cell,distance):
+		self.cell=cell
+		self.remainder=grid.distance(cell.x,cell.y,target.x,target.y)
+		self.distance=distance
+
 class Stats:
 	def __init__(self,p):
 		self.p=p
-		self.carStateFile=None
-		self.carStateFileName=p.statsFileName
+		self.statsFileName=p.statsFileName+p.fileName
 		if p.statsFileName=="":
 			return
-		self.carStateFileName=p.statsFileName+"_carstate.json"
+		self.carStateFile=None
 
 	def setT(self,t):
-		if self.carStateFileName=="":
+		if self.statsFileName=="":
 			return
 		if self.carStateFile==None:
-			# Open file
-			self.carStateFile=open(self.carStateFileName,"w")
-			self.car=[]
 			self.t=0		
+
+			self.carStateFile=open(self.statsFileName+"_carstate.json","w")
+			self.car=[]
+			
+			self.csQueueFile=open(self.statsFileName+"_csqueue.json","w")
+			self.cs=[]
 		else:
 			json.dump(self.car,self.carStateFile)
-			self.carStateFile.write("\n")  # New line for each t-step
+			self.carStateFile.write("\n") 
+
+			json.dump(self.cs,self.csQueueFile)
+			self.csQueueFile.write("\n")  
 		self.t=t
 
+	def close(self):
+		if self.statsFileName=="":
+			return
+		self.carStateFile.close()
+		self.csQueueFile.close()
+
 	def addCarState(self,num,carState):
-		if self.carStateFileName=="":
+		if self.statsFileName=="":
 			return
 		while len(self.car)<=num:
 			self.car.append({})
 		self.car[num]=carState	
 
-	def plot(self):
-		# close file
-		if self.carStateFile is not None:
-			self.carStateFile.close()
-			
+	def addCSQueue(self,num,queue):
+		if self.statsFileName=="":
+			return
+		while len(self.cs)<=num:
+			self.cs.append(0)
+		self.cs[num]=queue	
+
+	def plotCS(self,view=True):
 		# Load data from file
 		data_over_time = []
-		with open(self.carStateFileName, 'r') as file:
+		with open(self.statsFileName+"_csqueue.json", 'r') as file:
+			for line in file:
+				data_over_time.append(json.loads(line))
+
+		# Calculate standard deviation per line
+		std = [np.std(arr) for arr in data_over_time]
+
+		# Plot std
+		x = range(len(data_over_time))
+		plt.plot(x, std)
+		plt.xlabel('Time Steps')
+		plt.ylabel('Standard Deviation Queue')
+
+		# Plot using a stacked area plot
+		# x = range(len(data_over_time))
+		# plt.plot(x, data_over_time)
+		# plt.xlabel('Time Steps')
+		# plt.ylabel('Number of Vehicles')
+
+		# Put in title verticalBlocks, horizontalBlocks, aStarMethod and aStarCSWeb
+		plt.title(self.p.legendName)
+		#plt.xticks(ticks=range(len(data_over_time)), labels=[f'{i+1}' for i in range(len(data_over_time))])
+		plt.legend(loc='lower left')  
+
+		plt.savefig(self.p.statsFileName+self.p.fileName+"_csqueue.eps" , format='eps', dpi=300)
+		plt.savefig(self.p.statsFileName+self.p.fileName+"_csqueue.pdf" , format='pdf', dpi=300)
+		if view:
+			plt.show()
+		else:
+			plt.close()
+		#print()		
+
+	def plot(self,view=True):
+		# Load data from file
+		data_over_time = []
+		with open(self.statsFileName+"_carstate.json", 'r') as file:
 			for line in file:
 				data_over_time.append(json.loads(line))
 
@@ -1237,25 +1585,62 @@ class Stats:
 		plt.xlabel('Time Steps')
 		plt.ylabel('Number of Vehicles')
 
-		# Put in title verticalBlocks, horizontalBlocks, aStarMethod and aStarAddCSTimeSteps
-		plt.title(f'{self.p.verticalBlocks}x{self.p.horizontalBlocks} {self.p.numberCars} cars {self.p.aStarMethod} {"Road" if 0<self.p.aStarAddRoadCarAsTimeSteps else ""} {"CS" if self.p.aStarAddCSTimeSteps else ""}')
+		# Put in title verticalBlocks, horizontalBlocks, aStarMethod and aStarCSWeb
+		plt.title(self.p.legendName)
 		#plt.xticks(ticks=range(len(data_over_time)), labels=[f'{i+1}' for i in range(len(data_over_time))])
 		plt.legend(loc='lower left')  
 
-		plt.savefig(self.p.statsFileName+".eps" , format='eps', dpi=300)
-		plt.savefig(self.p.statsFileName+".pdf" , format='pdf', dpi=300)
-		plt.show()
-		print()
+		plt.savefig(self.p.statsFileName+self.p.fileName +"_carstate.eps" , format='eps', dpi=300)
+		plt.savefig(self.p.statsFileName+self.p.fileName+"_carstate.pdf" , format='pdf', dpi=300)
+		if view:			
+			plt.show()
+		else:
+			plt.close()
 
-if __name__ == '__main__':
+def cartesianExperiment():
 	p=Parameters()
+	ps=p.metaExperiment(
+		densityCars=[0.01,0.05,0.1],
+		energy=[1,0.5,0.01],
+		aStarMethod=["Time","Distance"],
+		aStarCSWev=[0,1,0.5],
+		#reserveCS=[False], # it has been removed because legend is too long
+	)
+	return ps
+
+def experiment(i):
+	p=cartesianExperiment()[i]
+
 	city=City(p)
 	#city.shell()
 
 	city.plot(True)
 	city.runWithoutPlot(1000)
-	city.stats.carStateFile.close()
 	#city.stats.plot()
 
 	stats=Stats(p)
-	stats.plot()
+	stats.plotCS(False)
+	stats.plot(False)
+
+if __name__ == '__main__':
+	start_time = time.time()  
+	experiment(1)
+	ps = cartesianExperiment()
+	num_processors = multiprocessing.cpu_count()
+
+	with multiprocessing.Pool(num_processors) as pool:
+		pool.map(experiment, range(len(ps)))
+		
+	end_time = time.time()  
+	duration = end_time - start_time 
+	print(f'Total time: {duration:.2f} seconds')
+
+	# ps=cartesianExperiment()
+	# works=[]
+	# for i in range(len(ps)):
+	# 	process = multiprocessing.Process(target=experiment, args=(i,))
+	# 	process.start()
+
+	# for process in works:
+	# 	process.join()
+
