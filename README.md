@@ -8,13 +8,13 @@ This tool allows you to manage and run scientific experiments in a selective man
 
 The program is executed from the command line using Python 3. Below are the available options:
 
-''' bash
+```bash
 python3 paper1.py -h
-'''
+```
 
 This will display the following help message with all the available options:
 
-''' bash
+```bash
 usage: paper1.py [-h] [--list] [--run RUN] [--all] [--stats]
 
 Selectively run experiments.
@@ -25,30 +25,30 @@ options:
 --run RUN Run a specific experiment by index
 --all Run all experiments in the background
 --stats Generate meta statistics
-'''
+```
 
 ### Examples
 
 - To list all experiments:
 
-''' bash
+```bash
 python3 paper1.py --list
-'''
+```
 
 - To run the experiment with a specific index (e.g., index 42):
 
-''' bash
+```bash
 python3 paper1.py --run 42
-'''
+```
 
 - To run all experiments in the background:
 
-''' bash
+```bash
 python3 paper1.py --all
-'''
+```
 
 - To generate the meta statistics:
 
-''' bash
+```bash
 python3 paper1.py --stats
-'''
+```
