@@ -1,7 +1,7 @@
 # VERDE
-#rsync -tav --delete  -e 'ssh -p 10622' /Users/drdj/el/P23/pysimtravel3 drdj@78.30.17.161:el/p23 --rsync-path='wsl rsync'
+rsync -tav --delete --exclude='.git/' -e 'ssh -p 10622' /Users/drdj/el/P23/pysimtravel3 drdj@78.30.17.161:el/p23 --rsync-path='wsl rsync'
 # VERDE INVERSO
-#rsync -tav --delete  -e 'ssh -p 10622' drdj@78.30.17.161:el/p22/Bolsa-Fundamental "/Users/drdj/el/P21"  --rsync-path='wsl rsync'
+#rsync -tav --delete --exclude='.git/' -e 'ssh -p 10622' drdj@78.30.17.161:el/p22/Bolsa-Fundamental "/Users/drdj/el/P21"  --rsync-path='wsl rsync'
 
 # Traer data
-rsync -tav --delete  -e 'ssh -p 10622' drdj@78.30.17.161:el/p23/pysimtravel3/data /Users/drdj/el/P23/pysimtravel3  --rsync-path='wsl rsync'
+#rsync -tav --delete  -e 'ssh -p 10622' drdj@78.30.17.161:el/p23/pysimtravel3/data /Users/drdj/el/P23/pysimtravel3  --rsync-path='wsl rsync'

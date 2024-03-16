@@ -61,6 +61,8 @@ class Parameters:
 		self.aStarMethod="Time" # Time or Distance
 		self.aStarRandomCS=False
 		self.aStarCSQueueQuery=0.5 # percentage of EV than use the web to see the queue of the CS (time)
+		self.aStarCSReserve=0.5 # percentage of EV than reserve a slot OF THE CSQUEUEQUERY 
+		
 
 		# when aStarMethod is Time
 		self.aStarAddRoadCarAsTimeSteps=0
@@ -70,8 +72,11 @@ class Parameters:
 
 		# interface parameters
 		self.viewWarning = True
-		self.viewDrawCity = False
-		self.statsFileName="data/stats_" # if "" then not save / stats1
+		self.viewDrawCity = True
+		#self.statsFileName="data/stats_" # paper1
+		self.statsFileName="paper2/stats_" 
+		self.metastatsFileName="paper2/metastats/"
+
 
 	def clone(self):
 		"""
@@ -170,6 +175,7 @@ class ChargingStation:
 		# Note: factorizable
 		self.queue=[]
 		self.carsInCS=0
+		self.reserve=[]
 
 		#self.insertInRouteMap(cell)
 	def createChargins(self):
@@ -185,6 +191,8 @@ class ChargingStation:
 		for car in self.car:
 			if car!=None:
 				total+=(car.p.carMovesFullDeposity-car.moves)/car.p.carRechargePerTic
+		for car in self.reserve:
+			total+=(car.p.carMovesFullDeposity-car.moves)/car.p.carRechargePerTic
 		return total/self.numberCharging	
 	def moveCS(self,t):
 		if self.carsInCS==0:
@@ -967,8 +975,11 @@ class Car:
 
 		# A percentage of cars have CS Queue Query
 		self.csqueuequery=False
+		self.csreserve=False
 		if self.id<p.aStarCSQueueQuery*p.numberCars:
 			self.csqueuequery=True
+			if self.id<p.aStarCSQueueQuery*p.aStarCSReserve*p.numberCars:
+				self.csreserve=True
 
 		# initial moves must be enough to reach the CS at least
 		dis,_,cs=self.localizeCS(cell,t)	
@@ -1070,6 +1081,12 @@ class Car:
 			cs.carsInCS+=1
 			self.target2.car=None
 			self.state=CarState.Queueing
+			# remove from reserve
+			if self.csreserve:
+				try:
+					cs.reserve.remove(self)
+				except:
+					pass
 			return True
 		return False
 
@@ -1095,6 +1112,8 @@ class Car:
 				pass
 			ire=self.aStar(cell,cs.cell,t)[1]
 			self.target2=cs.cell
+			if self.csreserve:
+				cs.reserve.append(self)
 		self.toCell=ire
 
 	def moveCar(self,t):
@@ -1739,7 +1758,11 @@ class MetaStats:
 		plt.tight_layout()
 
 		#plt.savefig("metastats/"+title+".eps" , format='eps', dpi=600)
-		plt.savefig("metastats/"+title+".pdf" , format='pdf', dpi=600)
+		# if not exists directory, create it
+		dir=self.ps[0].metastatsFileName
+		if not os.path.exists(dir):
+			os.makedirs(dir)
+		plt.savefig(dir+title+".pdf" , format='pdf', dpi=600)
 		if view:
 			plt.show()
 		else:
@@ -1786,15 +1809,13 @@ class MetaStats:
 def cartesianExperiment():
 	p=Parameters()
 	ps=p.metaExperiment(
-		#energy=[0.15,0.3,0.45,0.6,0.75,0.9],
 		seed=[12,34,56,78,90],
 		numberChargersPerBlock=[1,5,10],
-		aStarMethod=["Time","Distance"],
-		#aStarCSQueueQuery=[0,0.25,0.5,0.75,1], 
+		aStarMethod=["Time"], #,"Distance"
 		aStarCSQueueQuery=[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1], 
+		aStarCSReserve=[1,0],
 		densityCars=[0.05,0.1],
 		aStarUseCellExponentialWeight=[0.95,0.5],
-		#reserveCS=[False], # it has been removed because legend is too long
 	)
 	ps2=[]
 	for p in ps:
@@ -1868,41 +1889,42 @@ def experiment(i,view=False):
 # Assuming the cartesianExperiment, experiment, and MetaStats functions are defined elsewhere
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Selectively run experiments.')
-    parser.add_argument('--list', action='store_true', help='List all experiments')
-    parser.add_argument('--run', type=int, help='Run a specific experiment by index')
-    parser.add_argument('--all', action='store_true', help='Run all experiments in the background')
-    parser.add_argument('--stats', action='store_true', help='Generate meta statistics')
-    args = parser.parse_args()
+	# Set default values to None
+	default_values = {'list': None, 'view': 1, 'run': None, 'all': False, 'stats': False}
 
-    if not any(vars(args).values()):
-        parser.print_help()
-    else:
-        ps = cartesianExperiment()
+	parser = argparse.ArgumentParser(description='Selectively run experiments.')
+	parser.add_argument('--list', action='store_true', help='List all experiments', default=default_values['list'])
+	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
+	parser.add_argument('--run', type=int, help='Run a specific experiment by index', default=default_values['run'])
+	parser.add_argument('--all', action='store_true', help='Run all experiments in the background', default=default_values['all'])
+	parser.add_argument('--stats', action='store_true', help='Generate meta statistics', default=default_values['stats'])
+	args = parser.parse_args()
 
-        if args.list:
-            for (i, p) in enumerate(ps):
-                print(i, p.legendName)
+	if not any(vars(args).values()):
+		parser.print_help()
+	else:
+		ps = cartesianExperiment()
 
-        if args.run is not None:
-            experiment(args.run,True)
+		if args.list:
+			for (i, p) in enumerate(ps):
+				print(i, p.legendName)
 
-        if args.all:
-            start_time = time.time()
-            num_processors = multiprocessing.cpu_count()
+		if args.view is not None:
+			experiment(args.view,True)
 
-            ps2 = []
-            for i in range(0, len(ps), 50):
-                ps2.append(ps[i:i+50])
+		if args.run is not None:
+			experiment(args.run)
 
-            for i, ps in enumerate(ps2):
-                with multiprocessing.Pool(num_processors) as pool:
-                    pool.map(experiment, range(len(ps)))
-                print(f'Finished {i+1}/{len(ps2)}')
+		if args.all:
+			start_time = time.time()
+			num_processors = multiprocessing.cpu_count()
 
-            end_time = time.time()
-            duration = end_time - start_time
-            print(f'Total time: {duration:.2f} seconds')
+			with multiprocessing.Pool(num_processors) as pool:
+				pool.map(experiment, range(len(ps)))
 
-        if args.stats:
-            ms = MetaStats()
+			end_time = time.time()
+			duration = end_time - start_time
+			print(f'Total time: {duration:.2f} seconds')
+
+		if args.stats:
+			ms = MetaStats()
