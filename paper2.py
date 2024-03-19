@@ -315,6 +315,7 @@ class Cell:
 		self.occupation=0
 		self.exponentialOccupation=0
 		self.exponentialLastT=0
+		self.contaminationLevel=0
 
 	def add_neighbor(self, neighbor):
 		self.neighbors.append(neighbor)
@@ -690,113 +691,103 @@ class City:
 
 
 
-	def runWithoutPlot(self, times, returnFits = False, delta = 0.1, corner_factor = 1, gamma = 0.1, acc = None, dif_matrix = None, wind = None):
-		initial_time = time.time()
-		next(self.city_generator)
-		if returnFits:
-			carsAtDestination = 0
-			P = np.zeros((len(acc)+2, len(acc[0])+2, times+1))
-			G = np.zeros((len(acc)+2, len(acc[0])+2, times+1))
-			#keys = [car.id for car in self.cars if car.p.type == CarType.ICEV]
-			positions = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.ICEV and car.cell is not None}
-			positionsEV = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is not None}
-			positionsEV.update({car.id: [(car.target2.x,car.target2.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is None})
-			print(len(positions)+len(positionsEV))
-			print(len(self.cars))
-			velocities = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
-			accelerations = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
-			def substract_tuples(a,b,factor):
-				return ((a[0]-b[0])*factor,(a[1]-b[1])*factor)
-			def tuple_norm(a):
-				return np.sqrt(a[0]**2+a[1]**2)
-			E0 = 0
-			f1 = 5.53e-1
-			f2 = 1.61e-1
-			f3 = -2.89e-3
-			f4 = 2.66e-1
-			f5 = 5.11e-1
-			f6 = 1.83e-1
-		for i in range(times):
-			try:
-				if i>0:
-					next(self.city_generator)
-					self.cars[523]
-				if returnFits:
-					for key in positions:# for c in cars, positions[c]=...
-						positions[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
-						if i>0:
-							velocities[key][i-1] = (substract_tuples(positions[key][i],positions[key][i-1],5/1.8)) # Factor due to Amaro
-						if i>1:
-							accelerations[key][i-2] = (substract_tuples(velocities[key][i-1],velocities[key][i-2],1/1.8))
-							vel = tuple_norm(velocities[key][i-2])
-							accel = tuple_norm(accelerations[key][i-2])
-							a,b=positions[key][i-2]
-							G[a,b,i-2] = max(0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
-					for key in positionsEV:
-						if self.cars[key].cell is None:
-							positionsEV[key][i] = (self.cars[key].target2.x,self.cars[key].target2.y)
-						else:
-							positionsEV[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)
-					if i>1:
-						diffusion_edge = (
-							P[0:-2, 1:-1, i-2] + P[2:, 1:-1, i-2] +    # Up and down
-							P[1:-1, 0:-2, i-2] + P[1:-1, 2:, i-2]      # Left and right
-						)
-						diffusion_corner = (
-							P[0:-2, 0:-2, i-2] + P[2:, 2:, i-2] +      # Upper left and lower right diagonal
-							P[2:, 0:-2, i-2] + P[0:-2, 2:, i-2]        # Lower left and upper right diagonal
-						)
-						P[1:-1, 1:-1, i-2] = acc* (dif_matrix * P[1:-1, 1:-1, i-2] + delta / (4 + 4 * corner_factor) * (diffusion_edge + diffusion_corner * corner_factor))
-						P[1:-1, 1:-1, i-1] = (1-gamma) * acc * (wind[0][:,:,i-2]*P[2:, 1:-1, i-2] + wind[1][:,:,i-2]*P[:-2, 1:-1, i-2] + wind[2][:,:,i-2]*P[1:-1, :-2, i-2] + wind[3][:,:,i-2]*P[1:-1, 2:, i-2] + wind[4][:,:,i-2]*P[2:, :-2, i-2] + wind[5][:,:,i-2]*P[2:, 2:, i-2] + wind[6][:,:,i-2]*P[:-2, :-2, i-2] + wind[7][:,:,i-2]*P[:-2, 2:, i-2] + wind[8][:,:,i-2]*P[1:-1, 1:-1, i-2] + G[1:-1, 1:-1, i-2])
-					if i>=times-2:
-						for key in positions:
-							vel = tuple_norm(velocities[key][i])
-							accel = tuple_norm(accelerations[key][i])
-							a,b=positions[key][i-2]
-							G[a,b,i] = max(0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
-						diffusion_edge = (
-							P[0:-2, 1:-1, i] + P[2:, 1:-1, i] +    # Up and down
-							P[1:-1, 0:-2, i] + P[1:-1, 2:, i]      # Left and right
-						)
-						diffusion_corner = (
-							P[0:-2, 0:-2, i] + P[2:, 2:, i] +      # Upper left and lower right diagonal
-							P[2:, 0:-2, i] + P[0:-2, 2:, i]        # Lower left and upper right diagonal
-						)
-						P[1:-1, 1:-1, i] = acc * (dif_matrix * P[1:-1, 1:-1, i] + delta / (4 + 4 * corner_factor) * (diffusion_edge + diffusion_corner * corner_factor))
-						P[1:-1, 1:-1, i+1] = (1-gamma) * acc * (wind[0][:,:,i]*P[2:, 1:-1, i] + wind[1][:,:,i]*P[:-2, 1:-1, i] + wind[2][:,:,i]*P[1:-1, :-2, i] + wind[3][:,:,i]*P[1:-1, 2:, i] + wind[4][:,:,i]*P[2:, :-2, i] + wind[5][:,:,i]*P[2:, 2:, i] + wind[6][:,:,i]*P[:-2, :-2, i] + wind[7][:,:,i]*P[:-2, 2:, i] + wind[8][:,:,i]*P[1:-1, 1:-1, i] + G[1:-1, 1:-1, i])
-				elapsed_time = time.time() - initial_time
-				percentage_done = (i + 1) / times * 100
-				# Estimación del tiempo total basado en el progreso actual
-				total_estimated_time = elapsed_time / (percentage_done / 100)
-				estimated_completion_time = initial_time + total_estimated_time
-				print(
-					f"Progress: {percentage_done:.2f}% End: {time.strftime('%H:%M:%S', time.localtime(estimated_completion_time))} Total: {int(round(total_estimated_time))} seconds  ",
-					end="\r"
-				)
-			except StopIteration:
-				print("\ncity_generator has no more items to generate.")
-				break
+		def runWithoutPlot(self, times, returnFits = False, delta = 0.1, corner_factor = 1, gamma = 0.1, acc = None, dif_matrix = None, wind = None):
+			initial_time = time.time()
+			next(self.city_generator)
 			if returnFits:
-				carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
-				#print(carsAtDestination, '\n')
-		if returnFits:
-			P = np.maximum(P, 0)
-			max_color_value = np.max(P)#/10
-			print(max_color_value)
-			if False:#Plot?
-				def update_plot(frame_number, zarray, plot, fig, ax):
-					for collection in ax.collections:
-						collection.remove()
-					#ax.collections.clear()
-					total_pollution = np.sum(zarray[:, :, frame_number])
-					plot.set_data(zarray[:, :, frame_number])
-					ax.set_title(f"$t={frame_number}$, $P_{{tot}}={total_pollution:.6f}$")
-					x_vals = [a[frame_number][1]-1 for a in positions.values()]
-					y_vals = [a[frame_number][0]-1 for a in positions.values()]
-					x_vals_EV = [a[frame_number][1]-1 for a in positionsEV.values()]
-					y_vals_EV = [a[frame_number][0]-1 for a in positionsEV.values()]
-					ax.scatter(x_vals, y_vals, color='green', s=3)
-					ax.scatter(x_vals_EV, y_vals_EV, color='blue', s=1)
+				carsAtDestination = 0
+				width = len(acc)
+				height = len(acc[0])
+				P = np.zeros((width+2, height+2, times+1))
+				G = np.zeros((width+2, height+2, times+1))
+				#keys = [car.id for car in self.cars if car.p.type == CarType.ICEV]
+				positions = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.ICEV and car.cell is not None}
+				positionsEV = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is not None}
+				positionsEV.update({car.id: [(car.target2.x,car.target2.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is None})
+				print(len(positions)+len(positionsEV))
+				print(len(self.cars))
+				velocities = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
+				accelerations = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
+				def substract_tuples(a,b,factor):
+						return ((a[0]-b[0])*factor,(a[1]-b[1])*factor)
+				def tuple_norm(a):
+						return np.sqrt(a[0]**2+a[1]**2)
+				E0 = 0
+				f1 = 5.53e-1
+				f2 = 1.61e-1
+				f3 = -2.89e-3
+				f4 = 2.66e-1
+				f5 = 5.11e-1
+				f6 = 1.83e-1
+			for i in range(times):
+				try:
+						for k in range(width):
+							for j in range(height):
+								self.grid.grid[k,j].contaminationLevel = P[k,j,i]
+						if i>0:
+							next(self.city_generator)
+							#self.cars[523]
+						if returnFits:
+							for key in positions:# for c in cars, positions[c]=...
+								positions[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
+								if i>0:
+										velocities[key][i] = (substract_tuples(positions[key][i],positions[key][i-1],5/1.8)) # Factor due to Amaro
+								if i>1:
+										accelerations[key][i] = (substract_tuples(velocities[key][i],velocities[key][i-1],1/1.8))
+								vel = tuple_norm(velocities[key][i])
+								accel = tuple_norm(accelerations[key][i])
+								a,b=positions[key][i]
+								G[a,b,i] = max(E0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
+							diffusion_edge = (
+								P[0:-2, 1:-1, i] + P[2:, 1:-1, i] +    # Up and down
+								P[1:-1, 0:-2, i] + P[1:-1, 2:, i]      # Left and right
+							)
+							diffusion_corner = (
+								P[0:-2, 0:-2, i] + P[2:, 2:, i] +      # Upper left and lower right diagonal
+								P[2:, 0:-2, i] + P[0:-2, 2:, i]        # Lower left and upper right diagonal
+							)
+							P[1:-1, 1:-1, i] = acc * (dif_matrix * P[1:-1, 1:-1, i] + delta / (4 + 4 * corner_factor) * (diffusion_edge + diffusion_corner * corner_factor))
+							P[1:-1, 1:-1, i+1] = (1-gamma) * acc * (wind[0][:,:,i]*P[2:, 1:-1, i] + wind[1][:,:,i]*P[:-2, 1:-1, i] + wind[2][:,:,i]*P[1:-1, :-2, i] + wind[3][:,:,i]*P[1:-1, 2:, i] + wind[4][:,:,i]*P[2:, :-2, i] + wind[5][:,:,i]*P[2:, 2:, i] + wind[6][:,:,i]*P[:-2, :-2, i] + wind[7][:,:,i]*P[:-2, 2:, i] + wind[8][:,:,i]*P[1:-1, 1:-1, i] + G[1:-1, 1:-1, i])
+
+							for key in positionsEV:
+								if self.cars[key].cell is None:
+										positionsEV[key][i] = (self.cars[key].target2.x,self.cars[key].target2.y)
+								else:
+										positionsEV[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)
+										
+						elapsed_time = time.time() - initial_time
+						percentage_done = (i + 1) / times * 100
+						# Estimación del tiempo total basado en el progreso actual
+						total_estimated_time = elapsed_time / (percentage_done / 100)
+						estimated_completion_time = initial_time + total_estimated_time
+						print(
+							f"Progress: {percentage_done:.2f}% End: {time.strftime('%H:%M:%S', time.localtime(estimated_completion_time))} Total: {int(round(total_estimated_time))} seconds  ",
+							end="\r"
+						)
+				except StopIteration:
+						print("\ncity_generator has no more items to generate.")
+						break
+				if returnFits:
+						carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
+						#print(carsAtDestination, '\n')
+			if returnFits:
+				P = np.maximum(P, 0)
+				max_color_value = np.max(P)#/10
+				print(max_color_value)
+				if True:#Plot?
+						def update_plot(frame_number, zarray, plot, fig, ax):
+							for collection in ax.collections:
+								collection.remove()
+							#ax.collections.clear()
+							total_pollution = np.sum(zarray[:, :, frame_number])
+							plot.set_data(zarray[:, :, frame_number])
+							ax.set_title(f"$t={frame_number}$, $P_{{tot}}={total_pollution:.6f}$")
+							x_vals = [a[frame_number][1]-1 for a in positions.values()]
+							y_vals = [a[frame_number][0]-1 for a in positions.values()]
+							x_vals_EV = [a[frame_number][1]-1 for a in positionsEV.values()]
+							y_vals_EV = [a[frame_number][0]-1 for a in positionsEV.values()]
+							ax.scatter(x_vals, y_vals, color='green', s=3)
+							ax.scatter(x_vals_EV, y_vals_EV, color='blue', s=1)
 
 				# Create figure and axes
 				fig, ax = plt.subplots()
@@ -829,7 +820,7 @@ class City:
 				ani.save("pollution_genetic.gif", writer='imagemagick', fps=5)
 
 				plt.show()
-			new_acc = np.ones((len(acc)+2, len(acc[0])+2))
+			new_acc = np.ones((width+2, height+2))
 			new_acc[1:-1,1:-1] = acc
 			return -carsAtDestination/times+P[new_acc==1,:].mean()+P[new_acc==1,:].std(), [0] * len(self.grid.cs)
 		
@@ -1339,7 +1330,7 @@ class Car:
 			# negative priority is used to indicate that the car finished the submove
 			self.priority=-abs(self.priority)
 
-	def aStar(self,cell:Cell,target:Cell,t):
+	def aStar2(self,cell:Cell,target:Cell,t):
 		# Reserva espacio fijo
 		buscadores=500
 
@@ -1361,10 +1352,11 @@ class Car:
 		time=buscador[imejor].time
 		while len(current.destination)==1:		
 			current=current.destination[0]
-			time+=current.		
+			#time+=current.		
 		#mira si esta en ...
 		for b in buscador:
 			if b.cell==current:
+				pass
 
 	def aStarDistance(self,cell:Cell,target:Cell,t):
 		# Distance version
@@ -1401,7 +1393,7 @@ class Car:
 	def aStarTime(self,cell:Cell,target:Cell,t):
 		individuos
 
-	def aStarTimeV1(self,cell:Cell,target:Cell,t):
+	def aStarTime(self,cell:Cell,target:Cell,t):
 		# Time version
 		visited={}
 		opening=[TimeNode(self.p,i) for i in range(self.p.aStarDeep)]
@@ -2012,10 +2004,10 @@ class Individual:
 class Genetic:
 	def __init__(self,numExperiment, simulation_cache={}) -> None:
 		self.numExperiment = numExperiment
-		self.population_size = multiprocessing.cpu_count()
+		self.population_size = 4#multiprocessing.cpu_count()
 		#self.max_num_stations = 5
 		self.num_chargers = 45
-		self.num_timesteps = 200
+		self.num_timesteps = 10
 		#self.distance = lambda x,y : np.sqrt((x[0]-y[0])**2+(x[1]-y[1])**2)
 		self.lim_distance = 10
 		self.num_generations: int = 1
@@ -2067,14 +2059,14 @@ class Genetic:
 		stays = np.ones_like(WN)
 		for p in range(1, n_rows+1):
 			for q in range(1, n_cols+1):
-				displ_N[p,q, :] = acc[p,q] * np.maximum(WN[p, q,:], 0) * (1 - acc[p - 1, q + sign_WE[p,q,:]] * abs(WE[p, q, :])) * acc[p - 1, q]
-				displ_S[p,q, :] = acc[p,q] * np.maximum(-WN[p, q,:],0) * (1 - acc[p + 1, q + sign_WE[p,q,:]] * abs(WE[p, q, :])) * acc[p + 1, q]
-				displ_E[p,q, :] = acc[p,q] * np.maximum(WE[p, q,:], 0) * (1 - acc[p - sign_WN[p,q,:], q + 1] * abs(WN[p, q, :])) * acc[p, q + 1]
-				displ_W[p,q, :] = acc[p,q] * np.maximum(-WE[p, q,:],0) * (1 - acc[p - sign_WN[p,q,:], q - 1] * abs(WN[p, q, :])) * acc[p, q + 1]
-				displ_NE[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(WE[p, q,:], 0) * acc[p - 1, q + 1]
-				displ_NW[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q - 1]
-				displ_SE[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(WE[p, q,:], 0) * acc[p + 1, q + 1]
-				displ_SW[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(-WE[p, q,:],0) * acc[p + 1, q - 1]
+					displ_N[p,q, :] = acc[p,q] * np.maximum(WN[p, q,:], 0) * (1 - acc[p - 1, q + sign_WE[p,q,:]] * abs(WE[p, q, :])) * acc[p - 1, q]
+					displ_S[p,q, :] = acc[p,q] * np.maximum(-WN[p, q,:],0) * (1 - acc[p + 1, q + sign_WE[p,q,:]] * abs(WE[p, q, :])) * acc[p + 1, q]
+					displ_E[p,q, :] = acc[p,q] * np.maximum(WE[p, q,:], 0) * (1 - acc[p - sign_WN[p,q,:], q + 1] * abs(WN[p, q, :])) * acc[p, q + 1]
+					displ_W[p,q, :] = acc[p,q] * np.maximum(-WE[p, q,:],0) * (1 - acc[p - sign_WN[p,q,:], q - 1] * abs(WN[p, q, :])) * acc[p, q + 1]
+					displ_NE[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(WE[p, q,:], 0) * acc[p - 1, q + 1]
+					displ_NW[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q - 1]
+					displ_SE[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(WE[p, q,:], 0) * acc[p + 1, q + 1]
+					displ_SW[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(-WE[p, q,:],0) * acc[p + 1, q - 1]
 		stays += -(displ_N + displ_S + displ_E + displ_W + displ_NE + displ_NW + displ_SE + displ_SW)
 		self.wind = (displ_N[2:, 1:-1, :], displ_S[:-2, 1:-1, :], displ_E[1:-1, :-2, :], displ_W[1:-1, 2:, :], displ_NE[2:, :-2, :], displ_NW[2:, 2:, :], displ_SE[:-2, :-2, :], displ_SW[:-2, 2:, :], stays[1:-1, 1:-1, :])
 		self.simulation_cache = simulation_cache  # Diccionario para almacenar los resultados de las simulaciones
@@ -2088,8 +2080,8 @@ class Genetic:
 		for _ in range(1,M):
 			aux_coord = [x for x in set_valid_coordinates if all([self.distance(x,y)>=self.lim_distance and self.distance(y,x)>self.lim_distance for y in some_coordinates])]
 			if aux_coord==[]:
-				print('Error: No se pueden obtener las CS.')
-				exit()
+					print('Error: No se pueden obtener las CS.')
+					exit()
 			some_coordinates.append(random.choice(aux_coord))  
 		limits = sorted(random.choices(range(0, self.num_chargers + 1), k=M - 1))
 		limits = [0] + limits + [self.num_chargers]
@@ -2200,10 +2192,10 @@ class Genetic:
 			aux = results_ordered[auxnum]
 			results_ordered.pop(auxnum)
 			if all([self.distance(aux.coordinates, CS.coordinates) >= self.lim_distance or self.distance(CS.coordinates, aux.coordinates) >= self.lim_distance for CS in child_stations]) and sum([CS.num_chargers for CS in child_stations]) < self.num_chargers:
-				child_stations.append(aux)
+					child_stations.append(aux)
 		if child_stations == parent_1.stations or child_stations == parent_2.stations:
 			if len(child_stations) != 1:
-				child_stations.pop()
+					child_stations.pop()
 		return Individual(child_stations)
 	
 	def mutate(self, individual):
@@ -2214,11 +2206,15 @@ class Genetic:
 			new_num_chargers = random.randint(1, self.num_chargers)
 			indiv[mutation_index].num_chargers = new_num_chargers
 			coords = [indiv[k].coordinates for k in range(M) if k != mutation_index]
-			aux_coord = [x for x in self.valid_coordinates if all([self.distance(x,y)>=self.lim_distance and self.distance(y,x)>self.lim_distance for y in coords])]
-			if not aux_coord:
-				print('Error: No se pueden obtener las CS.')
-				exit()
-			indiv[mutation_index].coordinates = random.choice(aux_coord)
+			aux_coord = random.choice(self.valid_coordinates)
+			j=0
+			while any([self.distance(aux_coord,y)<self.lim_distance or self.distance(y,aux_coord)<self.lim_distance for y in coords]):
+					if j>10000:
+						print('Error: No se pueden obtener las CS.')
+						exit()
+					aux_coord = random.choice(self.valid_coordinates)
+					j+=1
+			indiv[mutation_index].coordinates = aux_coord
 		return Individual(indiv)
 
 	def renormalization(self, individual):
@@ -2263,23 +2259,26 @@ class Genetic:
 	def run(self) -> None:
 		self.population: List[Individual] = self.initialize_population()
 		self.fitness_values: List[float] = self.calculate_population_fitness()
-		values=[0]*self.num_generations
+		best_solution, best_value = self.find_best_solution()
+		print("Best Solution:", best_solution, "\nBest value:", best_value)
+		values=[0]*(self.num_generations+1)
+		values[0]=best_value
 		for generation in range(self.num_generations):
 			init_time = time.time()
-			print('Generation', generation)
+			print('Generation', generation+1)
 			parents = self.select_parents()
 			new_population = copy.deepcopy(parents)
 			while len(new_population) < self.population_size:
-				parent1, parent2 = random.sample(parents, 2)
-				newindiv = self.crossover(parent1,parent2)
-				newindiv = self.mutate(newindiv)
-				newindiv = self.renormalization(newindiv)
-				if newindiv not in new_population:
-					print('Generation ', generation, ' Individuals ', len(new_population))
-					new_population.append(newindiv)
+					parent1, parent2 = random.sample(parents, 2)
+					newindiv = self.crossover(parent1,parent2)
+					newindiv = self.mutate(newindiv)
+					newindiv = self.renormalization(newindiv)
+					if newindiv not in new_population:
+						new_population.append(newindiv)
+						print('Generation ', generation+1, ' Individuals ', len(new_population))
 			if len(new_population) < self.population_size:
-				print(f"Loop terminated at generation: {generation}")
-				break
+					print(f"Loop terminated at generation: {generation}")
+					break
 			self.population = new_population
 			self.fitness_values = self.calculate_population_fitness()
 			best_solution, best_value = self.find_best_solution()
@@ -2287,7 +2286,7 @@ class Genetic:
 			#print(best_value, '\n', self.calculate_fitness(parents[0]), '\n\n\n')
 			#print(sum([CS.num_chargers for CS in parents[0].stations]))
 			print("Best Solution:", best_solution, "\nBest value:", best_value)
-			values[generation]=best_value
+			values[generation+1]=best_value
 			self.population = new_population
 			finish_time = time.time()
 			aux = [tuple([(CS.coordinates,CS.num_chargers) for CS in indiv.stations]) for indiv in new_population]
@@ -2297,7 +2296,7 @@ class Genetic:
 		print("Best Solution:", best_solution, "\nBest value:", best_value)
 		print('Total different individials: ', len(self.simulation_cache))
 		print('Should be: ', (self.num_generations+1)*self.population_size - self.num_generations * (self.population_size // 2))
-		plt.plot(range(self.num_generations),values)
+		plt.plot(range(self.num_generations+1),values)
 		plt.show()
 
 
