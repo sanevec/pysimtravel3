@@ -1282,7 +1282,10 @@ class Car:
 		if toCell.t==t or toCell.car!=None: 
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
-				cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)
+				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
+				b=(1-self.p.aStarUseCellExponentialWeight)
+				c=1-a-b
+				cell.exponentialOccupation=cell.exponentialOccupation*a+c*1/cell.velocity+b*1
 				cell.exponentialLastT=t
 			if 1<len(cell.destination):
 				self.toCell.insert(0,toCell)
@@ -1300,7 +1303,12 @@ class Car:
 		cell.t=t
 		cell.occupation+=1/cell.velocity
 		if 0<self.p.aStarUseCellExponentialWeight:
-			cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
+			a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
+			# b=(1-self.p.aStarUseCellExponentialWeight)
+			# c=1-a-b
+			# cell.exponentialOccupation=cell.exponentialOccupation*a+c*1/cell.velocity+b*1/cell.velocity
+			d=1-a
+			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
 			cell.exponentialLastT=t
 		for s in cell.semaphore:
 			s.t=t
@@ -1329,34 +1337,6 @@ class Car:
 			#print("End")
 			# negative priority is used to indicate that the car finished the submove
 			self.priority=-abs(self.priority)
-
-	def aStar2(self,cell:Cell,target:Cell,t):
-		# Reserva espacio fijo
-		buscadores=500
-
-		buscador=[Buscador() for _ in range(buscadores)]
-
-		buscador[0].b[0].cell=cell
-
-		# Localiza mejor buscador no abierto
-		imejor=-1
-		for i in range(1,buscadores):
-			if not buscador[i].open:
-				if imejor==-1 or buscador[i].time<buscador[imejor].time:
-					imejor=i
-
-		# abre mejor
-		buscador[imejor].open=True
-		current=buscador[imejor].cell
-		#buscar próxima celda con bifurcación, sumando heurístico
-		time=buscador[imejor].time
-		while len(current.destination)==1:		
-			current=current.destination[0]
-			#time+=current.		
-		#mira si esta en ...
-		for b in buscador:
-			if b.cell==current:
-				pass
 
 	def aStarDistance(self,cell:Cell,target:Cell,t):
 		# Distance version
@@ -1391,9 +1371,35 @@ class Car:
 			distancia+=1
 
 	def aStarTime(self,cell:Cell,target:Cell,t):
-		individuos
+		# Reserva espacio fijo
+		buscadores=500
 
-	def aStarTime(self,cell:Cell,target:Cell,t):
+		buscador=[Buscador() for _ in range(buscadores)]
+
+		buscador[0].b[0].cell=cell
+
+		# Localiza mejor buscador no abierto
+		imejor=-1
+		for i in range(1,buscadores):
+			if not buscador[i].open:
+				if imejor==-1 or buscador[i].time<buscador[imejor].time:
+					imejor=i
+
+		# abre mejor
+		buscador[imejor].open=True
+		current=buscador[imejor].cell
+		#buscar próxima celda con bifurcación, sumando heurístico
+		time=buscador[imejor].time
+		while len(current.destination)==1:		
+			current=current.destination[0]
+			#time+=current.		
+		#mira si esta en ...
+		for b in buscador:
+			if b.cell==current:
+				pass
+
+
+	def aStarTimeV1(self,cell:Cell,target:Cell,t):
 		# Time version
 		visited={}
 		opening=[TimeNode(self.p,i) for i in range(self.p.aStarDeep)]
@@ -1455,7 +1461,9 @@ class Car:
 					worst.setCell(self.grid,d,target,best.distance+1)
 					if self.p.aStarUseCellAverageVelocity and 0<cell.t:
 						if 0<self.p.aStarUseCellExponentialWeight:
-							worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+							a=math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+							b=1-a
+							worst.time=best.time+best.cell.exponentialOccupation*a+b*1/best.cell.velocity
 						else:
 							worst.time=best.time+cell.occupation/cell.t
 					else:
