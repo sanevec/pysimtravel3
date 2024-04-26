@@ -19,6 +19,7 @@ import argparse
 from typing import List, Tuple, Callable
 import itertools
 from functools import partial
+import datetime
 from scipy.optimize import minimize
 from matplotlib.colors import LinearSegmentedColormap
 
@@ -71,6 +72,7 @@ class Parameters:
 		self.aStarMethod="Time" # Time or Distance
 		self.aStarRandomCS=False
 		self.aStarCSQueueQuery=0.5 # percentage of EV than use the web to see the queue of the CS (time)
+		self.aStarCSReserve=0.5 # percentage of EV than reserve a slot OF THE CSQUEUEQUERY 
 
 		# when aStarMethod is Time
 		self.aStarAddRoadCarAsTimeSteps=0
@@ -81,7 +83,9 @@ class Parameters:
 		# interface parameters
 		self.viewWarning = True
 		self.viewDrawCity = False
-		self.statsFileName="data/stats_" # if "" then not save / stats1
+		#self.statsFileName="data/stats_" # paper1
+		self.statsFileName="paper2/stats_" 
+		self.metastatsFileName="paper2/metastats/"
 
 	def clone(self):
 		"""
@@ -177,13 +181,15 @@ class ChargingStation:
 		self.grid=grid
 		self.cell=cell
 		if numPlugins == -1:
-			self.numPlugins = p.numberChargingPerStation
+			#self.numPlugins = p.numberChargingPerStation
+			self.numPlugins = p.numberChargersPerBlock
 		else:
 			self.numPlugins = numPlugins
 		cell.cs=self
 		# Note: factorizable
 		self.queue=[]
 		self.carsInCS=0
+		self.reserve=[]
 
 		#self.insertInRouteMap(cell)
 	def createChargins(self):
@@ -199,7 +205,11 @@ class ChargingStation:
 		for car in self.car:
 			if car!=None:
 				total+=(car.p.carMovesFullDeposity-car.moves)/car.p.carRechargePerTic
+		for car in self.reserve:
+			total+=(car.p.carMovesFullDeposity-car.moves)/car.p.carRechargePerTic	
 		return total/self.numberCharging	
+
+
 	def moveCS(self,t):
 		if self.carsInCS==0:
 			return
@@ -318,7 +328,7 @@ class Cell:
 		self.occupation=0
 		self.exponentialOccupation=0
 		self.exponentialLastT=0
-		self.contaminationLevel=0
+		self.pollutionLevel=0
 
 	def add_neighbor(self, neighbor):
 		self.neighbors.append(neighbor)
@@ -797,7 +807,7 @@ class City:
 				#		Psum[:,:,i] += P[pollutant][evType][:,:,i]
 				for k in range(width):
 					for j in range(height):
-						self.grid.grid[k,j].contaminationLevel = 0.5*(Psum[k,j,i] + self.grid.grid[k,j].contaminationLevel)
+						self.grid.grid[k,j].pollutionLevel = 0.5*(Psum[k,j,i] + self.grid.grid[k,j].pollutionLevel)
 				if i>0:
 					next(self.city_generator)
 				for k in range(num_cs):
@@ -992,9 +1002,10 @@ class City:
 			plt.plot(range(Psum.shape[2]),[np.sum(Psum[:,:,t]) for t in range(Psum.shape[2])])
 			plt.xlabel('$t/1.8 s$')
 			plt.ylabel('$P_{tot} (g)$')
-			filename = f"total_pollution_gamma_{gamma}.png"
+			#filename = f"total_pollution_gamma_{gamma}.png"
+			filename = "total_pollution.png"
 			plt.savefig(filename)
-			#plt.show()
+			plt.show()
 			plt.close()
 			if True:#Plot?
 				def update_plot(frame_number, zarray, plot, fig, ax):
@@ -1049,8 +1060,9 @@ class City:
 				# Save the animation as a MP4
 				#FFwriter = animation.FFMpegWriter(fps=5)
 				#ani.save(f"pollution_genetic_gamma_{gamma}.mp4", writer = FFwriter)
-				ani.save(f"pollution_genetic_gamma_{gamma}.gif", writer='imagemagick', fps=5)
-				#plt.show()
+				#ani.save(f"pollution_genetic_gamma_{gamma}.gif", writer='imagemagick', fps=5)
+				ani.save("pollution.gif", writer='imagemagick', fps=5)
+				plt.show()
 				plt.close()
 		new_acc = np.ones((width+2, height+2))
 		new_acc[1:-1,1:-1] = acc
@@ -1324,11 +1336,15 @@ class Grid:
 					d.semaphore.append(origin)
 
 class Buscador:
-	def __init__(self,profundidad):
+	def __init__(self):#,profundidad):
 		self.cell=None
 		self.father=None
+		self.heuristico=0
+		self.tiempo=0
 		self.time=0
 		self.open=False
+		self.numberChildren=0 # number of open children
+
 
 
 class Car:
@@ -1357,8 +1373,11 @@ class Car:
 
 		# A percentage of cars have CS Queue Query
 		self.csqueuequery=False
+		self.csreserve=False
 		if self.id<p.aStarCSQueueQuery*p.numberCars:
 			self.csqueuequery=True
+			if self.id<p.aStarCSQueueQuery*p.aStarCSReserve*p.numberCars:
+				self.csreserve=True
 
 		# initial moves must be enough to reach the CS at least
 		dis,_,cs=self.localizeCS(cell,t)	
@@ -1460,6 +1479,12 @@ class Car:
 			cs.carsInCS+=1
 			self.target2.car=None
 			self.state=CarState.Queueing
+			# remove from reserve
+			if self.csreserve:
+				try:
+					cs.reserve.remove(self)
+				except:
+					pass
 			return True
 		return False
 
@@ -1485,6 +1510,8 @@ class Car:
 				pass
 			ire=self.aStar(cell,cs.cell,t)[1]
 			self.target2=cs.cell
+			if self.csreserve:
+				cs.reserve.append(self)
 		self.toCell=ire
 
 	def moveCar(self,t):
@@ -1517,7 +1544,11 @@ class Car:
 		if toCell.t==t or toCell.car!=None: 
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
-				cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)
+				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
+				b=(1-self.p.aStarUseCellExponentialWeight)
+				c=1-a-b
+				cell.exponentialOccupation=cell.exponentialOccupation*a+c*1/cell.velocity+b*1
+				#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)
 				cell.exponentialLastT=t
 			if 1<len(cell.destination):
 				self.toCell.insert(0,toCell)
@@ -1535,7 +1566,13 @@ class Car:
 		cell.t=t
 		cell.occupation+=1/cell.velocity
 		if 0<self.p.aStarUseCellExponentialWeight:
-			cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
+			a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
+			# b=(1-self.p.aStarUseCellExponentialWeight)
+			# c=1-a-b
+			# cell.exponentialOccupation=cell.exponentialOccupation*a+c*1/cell.velocity+b*1/cell.velocity
+			d=1-a
+			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
+			#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
 			cell.exponentialLastT=t
 		for s in cell.semaphore:
 			s.t=t
@@ -1565,6 +1602,19 @@ class Car:
 			# negative priority is used to indicate that the car finished the submove
 			self.priority=-abs(self.priority)
 
+	def aStar(self,cell:Cell,target:Cell,t):
+		if not hasattr(self.grid,"aStarPerMillisecond"):
+			self.grid.aStarTotal=0
+			self.grid.aStarPerMillisecond=0
+		since=datetime.datetime.now()
+		aux= getattr(self,"aStar"+self.p.aStarMethod)(cell,target,t)
+		now=datetime.datetime.now()
+		millis=(now-since).microseconds/1000
+		self.grid.aStarTotal+=1
+		self.grid.aStarPerMillisecond+=millis
+		#print("millis per aStar:",self.grid.aStarPerMillisecond/self.grid.aStarTotal)
+		return aux
+	'''
 	def aStar2(self,cell:Cell,target:Cell,t):
 		# Reserva espacio fijo
 		buscadores=500
@@ -1595,6 +1645,7 @@ class Car:
 
 	def aStar(self,cell:Cell,target:Cell,t):
 		return getattr(self,"aStar"+self.p.aStarMethod)(cell,target,t)
+	'''
 	 
 	def aStarDistance(self,cell:Cell,target:Cell,t):
 		# Distance version
@@ -1628,8 +1679,160 @@ class Car:
 			opened2={}
 			distancia+=1
 
-	#def aStarTime(self,cell:Cell,target:Cell,t):
-#		individuos
+	def aplicarHijos(self,buscador,father, mejora):
+		for b in buscador:
+			if b.father==father:
+				b.heuristico+=mejora
+				b.tiempo+=mejora
+				if b.tiempo<0:
+					print("Error: negative time")
+				self.aplicarHijos(buscador,b,mejora)
+
+	def boorarHijos(self,buscador,padre):
+		for b in buscador:
+			if b.father==padre:
+				b.cell=None
+				b.father=None
+				b.heuristico=0
+				b.tiempo=0
+				b.open=False
+				b.numberChildren=0
+				self.boorarHijos(buscador,b)
+
+	def aplicarPadre(self,hijo,padre,mejora):
+		if padre==None:
+			return
+		if padre.mejorHijo==hijo:
+			padre.heuristico+=mejora
+			self.aplicarPadre(padre,padre.father,mejora)
+
+	def path(self,buscador,lista):
+		if buscador.father==None:
+			return
+		self.path(buscador.father,lista)
+		lista.append(buscador.cell)
+
+
+
+
+	def aStarTimeV2(self,cell:Cell,target:Cell,t,buscadores=100):
+		buscador=[Buscador() for _ in range(buscadores)]
+
+		buscador[0].cell=cell
+
+		def tiempoDe(cell):
+			currentTime=0
+			if self.p.aStarUseCellAverageVelocity and 0<cell.t:
+				if 0<self.p.aStarUseCellExponentialWeight:
+					a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
+					b=1-a
+					currentTime=cell.exponentialOccupation*a+b*1/cell.velocity
+				else:
+					currentTime=cell.occupation/cell.t
+			else:
+				currentTime=1/cell.velocity
+			return currentTime
+
+		totalTime=0
+		totalDistance=0
+
+		while True:
+			# Localiza mejor buscador no abierto
+			father=None
+			for cand in buscador:
+				if not cand.open and cand.cell!=None:
+					if father==None or father.heuristico>cand.heuristico:
+						father=cand
+
+			if father==None:
+				try:
+					return self.aStarTime(cell,target,t,buscadores*10)
+				except RecursionError as e:
+					print("Error: profundidad máxima de recursión excedida. V21")
+
+			father.open=True
+			current=father.cell
+
+			#buscar próxima celda con bifurcación, sumando heurístico
+			currentTimeSegment=father.tiempo+tiempoDe(current)
+			while len(current.destination)==1:		
+				if current==target:
+					# me falta marcar el mejor hijo, para reemplazo
+					path=[]
+					try:
+						self.path(father,path)
+					except RecursionError as e:
+						print("Error: profundidad máxima de recursión excedida. V22")
+					return (currentTimeSegment,path)
+					# timeV1,pathV1=self.aStarTimeV1(cell,target,t)
+					# # compare path with pathV1 if are different
+					# # if len(path)!=len(pathV1):
+					# # 	print("Error: path different")
+					# # for i in range(len(path)):
+					# # 	if path[i]!=pathV1[i]:
+					# # 		print("Error: path different")
+
+					# return (timeV1,pathV1)
+				current=current.destination[0]
+				# comprueba si es target
+				currentTimeSegment+=tiempoDe(current)
+
+
+			for d in current.destination:
+				dOrigin=abs(d.x-cell.x)+abs(d.y-cell.y)
+				totalDistance+=dOrigin
+				totalTime+=currentTimeSegment		
+				#print("totalDistance",totalDistance)
+
+				distancia=abs(d.x-target.x)+abs(d.y-target.y)
+
+				time2=distancia*totalTime/totalDistance
+				heuristico=time2+currentTimeSegment
+
+				esta=None
+				for b in buscador:
+					if b.cell==d:
+						esta=b
+						break
+				if esta!=None:
+					if esta.tiempo>currentTimeSegment:
+							# Mueve la cuenta.
+							father.numberChildren+=1
+							esta.father.numberChildren-=1
+
+							# Encuentra una mejor solución procede a su reemplazo
+							#mejora=heuristico-esta.heuristico
+							esta.heuristico=heuristico
+							esta.tiempo=currentTimeSegment
+							esta.father=father
+							esta.open=False
+							esta.numberChildren=0
+							try:
+								self.boorarHijos(buscador,esta)
+							except RecursionError as e:
+								print("Error: profundidad máxima de recursión excedida. V23")
+							# if esta.open:
+							# 	self.aplicarHijos(buscador,esta,mejora)
+				else:
+					# si no está inserta, la cabeza y los hijos operas...
+					# Localiza candidato a reemplazar
+					minimo=None
+					for i,b in enumerate(buscador):
+						if b.numberChildren==0:
+							if minimo==None or b.cell==None or b.heuristico>minimo.heuristico:
+								minimo=b
+								if b.cell==None:
+									break
+					if minimo.cell==None or minimo.heuristico>heuristico:
+						father.numberChildren+=1
+						minimo.cell=d
+						if minimo.father!=None:
+							minimo.father.numberChildren-=1
+						minimo.father=father
+						minimo.open=False
+						minimo.heuristico=heuristico
+						minimo.tiempo=currentTimeSegment
+						minimo.numberChildren=0
 
 	def aStarTime(self,cell:Cell,target:Cell,t):
 		# Time version
@@ -1693,7 +1896,10 @@ class Car:
 					worst.setCell(self.grid,d,target,best.distance+1)
 					if self.p.aStarUseCellAverageVelocity and 0<cell.t:
 						if 0<self.p.aStarUseCellExponentialWeight:
-							worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+							a=math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+							b=1-a
+							worst.time=best.time+best.cell.exponentialOccupation*a+b*1/best.cell.velocity							
+							#worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
 						else:
 							worst.time=best.time+cell.occupation/cell.t
 					else:
@@ -2061,7 +2267,12 @@ class MetaStats:
 		plt.tight_layout()
 
 		#plt.savefig("metastats/"+title+".eps" , format='eps', dpi=600)
-		plt.savefig("metastats/"+title+".pdf" , format='pdf', dpi=600)
+		# if not exists directory, create it
+		dir=self.ps[0].metastatsFileName
+		if not os.path.exists(dir):
+			os.makedirs(dir)
+		plt.savefig(dir+title+".pdf" , format='pdf', dpi=600)
+		#plt.savefig("metastats/"+title+".pdf" , format='pdf', dpi=600)
 		if view:
 			plt.show()
 		else:
@@ -2113,7 +2324,8 @@ def cartesianExperiment():
 		numberChargersPerBlock=[1,5,10],
 		aStarMethod=["Time","Distance"],
 		#aStarCSQueueQuery=[0,0.25,0.5,0.75,1], 
-		aStarCSQueueQuery=[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1], 
+		aStarCSQueueQuery=[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1],
+		aStarCSReserve=[1,0],
 		densityCars=[0.05,0.1],
 		aStarUseCellExponentialWeight=[0.95,0.5],
 		#reserveCS=[False], # it has been removed because legend is too long
@@ -2142,7 +2354,7 @@ def experiment(i,view=False,cache=True,indiv=None, returnFits = False, contamina
 				return
 
 	random.seed(p.seed)
-	p.densityCars=0.05
+	p.densityCars=0.05 #HACKED
 	city=City(p,indiv)
 
 	if view:
@@ -2545,7 +2757,7 @@ class ContaminationExperiment:
 		self.population_size = multiprocessing.cpu_count()
 		#self.max_num_stations = 5
 		self.num_chargers = 2
-		self.num_timesteps = 2000
+		self.num_timesteps = 1000
 		p=cartesianExperiment()[numExperiment]
 		p.listgenerator=True
 		p.numberChargingPerStation=0
@@ -2605,7 +2817,7 @@ class ContaminationExperiment:
 		(n_rows, n_cols) = city1.sizes
 		self.delta = 0.1  # Diffusion parameter
 		self.corner_factor = 1#/np.sqrt(2)
-		self.gamma = 0.1 # Lost to the atmosphere
+		self.gamma = 0.01 # Lost to the atmosphere
 		acc = np.zeros((n_rows+2, n_cols+2))
 		for x,y in self.valid_coordinates:
 			acc[x,y] = 1
@@ -2673,8 +2885,8 @@ class ContaminationExperiment:
 		
 		self.acc = acc[1:-1, 1:-1]
 		self.dif_matrix = dif_matrix
-		WN = 0 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
-		WE = 0 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		WN = 0.1 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		WE = 0.2 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
 		sign_WN = np.sign(WN).astype(int)
 		sign_WE = np.sign(WE).astype(int)
 		displ_N = np.zeros_like(WN)
@@ -2717,8 +2929,11 @@ class ContaminationExperiment:
 # Assuming the cartesianExperiment, experiment, and MetaStats functions are defined elsewhere
 
 if __name__ == '__main__':
+	# Set default values to None
+	default_values = {'list': None, 'view': 1, 'run': None, 'all': False, 'stats': False}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
 	parser.add_argument('--list', action='store_true', help='List all experiments')
+	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
 	parser.add_argument('--run', type=int, help='Run a specific experiment by index')
 	parser.add_argument('--all', action='store_true', help='Run all experiments in the background')
 	parser.add_argument('--stats', action='store_true', help='Generate meta statistics')
@@ -2749,6 +2964,9 @@ if __name__ == '__main__':
 			for (i, p) in enumerate(ps):
 				print(i, p.legendName)
 
+		if args.view is not None:
+			experiment(args.view,True)
+
 		if args.run is not None:
 			if not (args.genetic or args.contamination):
 				experiment(args.run,True)#True)
@@ -2756,15 +2974,15 @@ if __name__ == '__main__':
 				g=Genetic(args.run)
 				g.run()
 			else:
-				for gamma in [0.05, 0.1, 0.2]:#0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2]:#0.00, 0.01, 0.02, 0.03, 0.04,
+				#for gamma in [0.05, 0.1, 0.2]:#0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2]:#0.00, 0.01, 0.02, 0.03, 0.04,
 					g = ContaminationExperiment(args.run)
-					g.gamma=gamma
+				#	g.gamma=gamma
 					g.run()
 
 		if args.all:
 			start_time = time.time()
 			num_processors = multiprocessing.cpu_count()
-
+			'''
 			ps2 = []
 			for i in range(0, len(ps), 50):
 				ps2.append(ps[i:i+50])
@@ -2773,6 +2991,9 @@ if __name__ == '__main__':
 				with multiprocessing.Pool(num_processors) as pool:
 					pool.map(experiment, range(len(ps)))
 				print(f'Finished {i+1}/{len(ps2)}')
+			'''
+			with multiprocessing.Pool(num_processors) as pool:
+				pool.map(experiment, range(len(ps)))
 
 			end_time = time.time()
 			duration = end_time - start_time
