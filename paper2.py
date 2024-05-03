@@ -3,7 +3,7 @@ from time import sleep
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import matplotlib.colors as colors
+#import matplotlib.colors as colors
 import matplotlib.colors as mcolors
 import random
 from collections import namedtuple
@@ -22,6 +22,7 @@ from functools import partial
 import datetime
 from scipy.optimize import minimize
 from matplotlib.colors import LinearSegmentedColormap
+import pickle
 
 
 
@@ -50,6 +51,9 @@ class Parameters:
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
 		
 		self.percentageEV=0.5
+		self.percentageICEVDiesel=0.1
+
+		self.numberChargersPerBlock=1
 
 		self.densityCars=0.1
 		self.carMovesFullDeposity=27000
@@ -701,7 +705,7 @@ class City:
 
 		fig.canvas.mpl_connect('button_press_event', on_click)
 
-		plt.show(block=block)
+		#plt.show(block=block) #HACKED ANTES MOSTRABA
 
 
 
@@ -1064,6 +1068,21 @@ class City:
 				ani.save("pollution.gif", writer='imagemagick', fps=5)
 				plt.show()
 				plt.close()
+		#filtered_dict = {key: original_dict[key] for key in keys_to_keep if key in original_dict}
+		cars = {
+			'EV': {'position': positionsEV, 'velocity': velocitiesEV, 'acceleration': accelerationsEV},
+			'Petrol': {'position': {key:positions[key] for key in  positions if key not in diesel}, 'velocity': {key:velocities[key] for key in  positions if key not in diesel}, 'acceleration': {key:accelerations[key] for key in  positions if key not in diesel}},
+			'Diesel': {'position': {key:positions[key] for key in diesel}, 'velocity': {key:velocities[key] for key in diesel}, 'acceleration': {key:accelerations[key] for key in diesel}}
+			}
+		filename = f"P_delta_{delta}_gamma_{gamma}.pkl"
+		with open(filename, 'wb') as file:
+			pickle.dump(P, file)
+		filename = f"G_delta_{delta}_gamma_{gamma}.pkl"
+		with open(filename, 'wb') as file:
+			pickle.dump(G, file)
+		filename = f"cars_delta_{delta}_gamma_{gamma}.pkl"
+		with open(filename, 'wb') as file:
+			pickle.dump(cars, file)
 		new_acc = np.ones((width+2, height+2))
 		new_acc[1:-1,1:-1] = acc
 		if returnFits:
@@ -1163,7 +1182,10 @@ class City:
 		p.numberChargers=p.numberChargersPerBlock*p.numberBlocks
 
 		#p.numberChargers=p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic*p.energy
-		p.energy=p.numberChargers/(p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic)
+		if p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic==0:
+			p.energy = np.inf
+		else:
+			p.energy=p.numberChargers/(p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic)
 		print("energy",p.energy)
 		
 		#p.numberChargersPerBlock=p.numberChargers/p.numberBlocks
@@ -1330,10 +1352,13 @@ class Grid:
 			
 			#autosemaphore
 			if len(target.origin)>1:
-				#target.origin[0].semaphore.append(origin)
-				#target.origin[0].origin[0].semaphore.append(origin.origin[0])
+			#target.origin[0].semaphore.append(origin)
+			#target.origin[0].origin[0].semaphore.append(origin.origin[0])
 				for d in target.destination:
-					d.semaphore.append(origin)
+				#d.semaphore.append(origin)
+					d.semaphore.append(target)
+			if len(origin.origin)>1:
+				target.semaphore.append(origin)
 
 class Buscador:
 	def __init__(self):#,profundidad):
@@ -1542,6 +1567,8 @@ class Car:
 			toCell=self.toCell.pop(0)
 
 		if toCell.t==t or toCell.car!=None: 
+			for s in cell.semaphore:
+				s.t=t
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
 				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1560,6 +1587,8 @@ class Car:
 		# identifica si es ilegal, no join
 		# self.checkLegalMove(cell,toCell)
 		#print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
+		for s in toCell.semaphore:
+			s.t=t
 		self.cell = toCell
 		cell.car = None
 		toCell.car = self
@@ -1574,8 +1603,7 @@ class Car:
 			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
 			#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
 			cell.exponentialLastT=t
-		for s in cell.semaphore:
-			s.t=t
+
 
 		# Calculate priority
 		if len(toCell.destination)==1:
@@ -1907,6 +1935,8 @@ class Car:
 					if 0<self.p.aStarAddRoadCarAsTimeSteps and best.cell.car!=None:
 						worst.time+=self.p.aStarAddRoadCarAsTimeSteps
 
+						
+
 					# clone copy of decision list
 					worst.decision=best.decision.copy()
 					# if d comes from a bifurcation add
@@ -2090,7 +2120,7 @@ class Stats:
 		#plt.savefig(self.p.statsFileName+self.p.fileName+"_csqueue.eps" , format='eps', dpi=600)
 		plt.savefig(self.p.statsFileName+self.p.fileName+"_csqueue.pdf" , format='pdf', dpi=600)
 		if view:
-			plt.show()
+			plt.show() 
 		else:
 			plt.close()
 		#print()		
@@ -2321,13 +2351,15 @@ def cartesianExperiment():
 	ps=p.metaExperiment(
 		#energy=[0.15,0.3,0.45,0.6,0.75,0.9],
 		seed=[12,34,56,78,90],
-		numberChargersPerBlock=[1,5,10],
-		aStarMethod=["Time","Distance"],
+		#numberChargersPerBlock=[1,5,10],#cambiar por las 3 config
+		#aStarMethod=["Time"],#"Distance"],#solo tiempo, o también evitar contaminación?
 		#aStarCSQueueQuery=[0,0.25,0.5,0.75,1], 
-		aStarCSQueueQuery=[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1],
-		aStarCSReserve=[1,0],
-		densityCars=[0.05,0.1],
-		aStarUseCellExponentialWeight=[0.95,0.5],
+		#aStarCSQueueQuery=[0.5],#poner el óptimo (ver paper)
+		#aStarCSReserve=[0.5],#<= que el anterior, x primeros. ¿de los que consultan, qué porcentaje reservan? comprobar
+		densityCars=[0.05,0.1,0.15],#,#añadir porcentaje de tipos
+		percentageEV=[0,0.1,0.2,0.3,0.4,0.5,0.75,1],
+		percentageICEVDiesel=[0,0.05,0.1,0.2,0.5]
+		#aStarUseCellExponentialWeight=[0.5],#mirar cuál daba mejores resultados y usar solo ese ('0.95??)
 		#reserveCS=[False], # it has been removed because legend is too long
 	)
 	ps2=[]
@@ -2354,7 +2386,12 @@ def experiment(i,view=False,cache=True,indiv=None, returnFits = False, contamina
 				return
 
 	random.seed(p.seed)
-	p.densityCars=0.05 #HACKED
+	#p.densityCars=0.05 #HACKED
+	p.aStarMethod="Time"#"Distance"],#solo tiempo, o también evitar contaminación?
+	p.aStarCSQueueQuery=0.5#poner el óptimo (ver paper)
+	p.aStarCSReserve=0.5#<= que el anterior, x primeros. ¿de los que consultan, qué porcentaje reservan? comprobar
+	#densityCars=[0.05,0.1],#añadir porcentaje de tipos
+	p.aStarUseCellExponentialWeight=0.5
 	city=City(p,indiv)
 
 	if view:
@@ -2753,11 +2790,13 @@ class Genetic:
 
 class ContaminationExperiment:
 	def __init__(self,numExperiment, simulation_cache={}) -> None:
+		numExperiment=43
 		self.numExperiment = numExperiment
 		self.population_size = multiprocessing.cpu_count()
 		#self.max_num_stations = 5
 		self.num_chargers = 2
-		self.num_timesteps = 1000
+		self.num_timesteps = 100
+		numExperiment=0
 		p=cartesianExperiment()[numExperiment]
 		p.listgenerator=True
 		p.numberChargingPerStation=0
@@ -2817,7 +2856,7 @@ class ContaminationExperiment:
 		(n_rows, n_cols) = city1.sizes
 		self.delta = 0.1  # Diffusion parameter
 		self.corner_factor = 1#/np.sqrt(2)
-		self.gamma = 0.01 # Lost to the atmosphere
+		self.gamma = 0.00 # Lost to the atmosphere
 		acc = np.zeros((n_rows+2, n_cols+2))
 		for x,y in self.valid_coordinates:
 			acc[x,y] = 1
@@ -2885,8 +2924,8 @@ class ContaminationExperiment:
 		
 		self.acc = acc[1:-1, 1:-1]
 		self.dif_matrix = dif_matrix
-		WN = 0.1 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
-		WE = 0.2 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		WN = 0 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		WE = 0.1 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
 		sign_WN = np.sign(WN).astype(int)
 		sign_WE = np.sign(WE).astype(int)
 		displ_N = np.zeros_like(WN)
@@ -2930,7 +2969,7 @@ class ContaminationExperiment:
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': 1, 'run': None, 'all': False, 'stats': False}
+	default_values = {'list': None, 'view': None, 'run': None, 'all': False, 'stats': False}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
 	parser.add_argument('--list', action='store_true', help='List all experiments')
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
