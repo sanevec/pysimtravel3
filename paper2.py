@@ -43,11 +43,10 @@ class Parameters:
 		viewDrawCity (bool): If true, draw the city
 	"""
 	def __init__(self):
-		self.verticalBlocks=3
-		self.horizontalBlocks=3
+		self.verticalBlocks=1
+		self.horizontalBlocks=1
 		self.numberBlocks=self.verticalBlocks*self.horizontalBlocks
 		self.numberStationsPerBlock=1# tipical 1/(numberBlocks), 1, 4
-		self.yellowBox=True
 
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
 		
@@ -327,6 +326,7 @@ class Cell:
 		self.car=None
 		self.cs=None
 		self.t=0
+		self.t0=0
 		self.tCache=0 # time in with cached is calculated
 		self.timeCache=None # time of the calculation
 		self.semaphore=[] # if there is a car over then close the cells in list
@@ -1253,6 +1253,7 @@ class City:
 
 		# Simulation
 		while True:
+			#sleep(1)
 			self.t+=1
 			self.stats.setT(self.t) # INTERCEPTAR
 			firstTime=True
@@ -1356,10 +1357,10 @@ class Grid:
 			#target.origin[0].semaphore.append(origin)
 			#target.origin[0].origin[0].semaphore.append(origin.origin[0])
 				for d in target.destination:
-				#d.semaphore.append(origin)
-					d.semaphore.append(target)
-			if len(origin.origin)>1:
-				target.semaphore.append(origin)
+					d.semaphore.append(origin)
+					# d.semaphore.append(target)
+			# if len(origin.origin)>1:
+			# 	target.semaphore.append(origin)
 
 class Buscador:
 	def __init__(self):#,profundidad):
@@ -1519,7 +1520,7 @@ class Car:
 
 		if self.p.type==CarType.ICEV:
 			# If the car is ICEV, it will not need to recharge
-			self.toCell=[ire[0]] # HACKED QUITAR [] y [0]
+			self.toCell=ire
 			return 
 
 		if len(ire)==0:
@@ -1567,10 +1568,29 @@ class Car:
 			calculateNext(cell)
 			toCell=self.toCell.pop(0)
 
-		if toCell.t==t or toCell.car!=None:
-			if self.p.yellowBox:
-				for s in cell.semaphore:
-					s.t=t
+		isStop=toCell.t==t or toCell.car!=None
+		if not isStop and (len(toCell.destination)>1 or len(toCell.origin)>1):
+			if 1==len(toCell.destination):
+				toCell2=toCell.destination[0]
+			elif 0<len(self.toCell):
+				toCell2=self.toCell[0]
+			else:
+				calculateNext(toCell)
+				toCell2=self.toCell[0]
+			isStop=toCell2.t==t or toCell2.car!=None
+
+			if isStop:
+				# Ten cicles waiting, move to the other cell if possible
+				if t-toCell2.t0>10:
+					for other in toCell.destination:
+						if other!=toCell2 and other.car==None:
+							isStop=False
+							self.toCell=[other]
+							break
+
+		if isStop: 
+			for s in cell.semaphore:
+				s.t=t+1
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
 				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1589,13 +1609,13 @@ class Car:
 		# identifica si es ilegal, no join
 		# self.checkLegalMove(cell,toCell)
 		#print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
-		if self.p.yellowBox:
-			for s in toCell.semaphore:
-				s.t=t
+		# for s in cell.semaphore:
+		# 	s.t=t
 		self.cell = toCell
 		cell.car = None
 		toCell.car = self
 		cell.t=t
+		toCell.t0=t
 		cell.occupation+=1/cell.velocity
 		if 0<self.p.aStarUseCellExponentialWeight:
 			a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1606,9 +1626,6 @@ class Car:
 			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
 			#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
 			cell.exponentialLastT=t
-		if not self.p.yellowBox:
-			for s in cell.semaphore:
-				s.t=t
 
 
 		# Calculate priority
@@ -2975,14 +2992,14 @@ class ContaminationExperiment:
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': None, 'run': None, 'all': False, 'stats': False, 'contamination':False}
+	default_values = {'list': None, 'view': 43, 'run': None, 'all': False, 'stats': False,'contamination':False, 'genetic':False}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
-	parser.add_argument('--list', action='store_true', help='List all experiments')
+	parser.add_argument('--list', action='store_true', help='List all experiments', default=default_values['list'])
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
-	parser.add_argument('--run', type=int, help='Run a specific experiment by index')
-	parser.add_argument('--all', action='store_true', help='Run all experiments in the background')
-	parser.add_argument('--stats', action='store_true', help='Generate meta statistics')
-	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option')
+	parser.add_argument('--run', type=int, help='Run a specific experiment by index', default=default_values['run'])
+	parser.add_argument('--all', action='store_true', help='Run all experiments in the background', default=default_values['all'])
+	parser.add_argument('--stats', action='store_true', help='Generate meta statistics', default=default_values['stats'])
+	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option', default=default_values['genetic'])
 	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments', default=default_values['contamination'])
 	#parser.add_argument()
 
