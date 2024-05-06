@@ -47,6 +47,7 @@ class Parameters:
 		self.horizontalBlocks=3
 		self.numberBlocks=self.verticalBlocks*self.horizontalBlocks
 		self.numberStationsPerBlock=1# tipical 1/(numberBlocks), 1, 4
+		self.yellowBox=True
 
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
 		
@@ -685,8 +686,8 @@ class City:
 		fig, ax = plt.subplots()
 
 		bounds = [0, 1, 2, 3, 4, 5, 6, 7]
-		cmap = colors.ListedColormap(['black',  'green', 'blue','red', 'yellow', 'white','orange'])
-		norm = colors.BoundaryNorm(bounds, cmap.N)
+		cmap = mcolors.ListedColormap(['black',  'green', 'blue','red', 'yellow', 'white','orange'])
+		norm = mcolors.BoundaryNorm(bounds, cmap.N)
 	
 
 		def extract_color(cell_obj):
@@ -705,7 +706,7 @@ class City:
 
 		fig.canvas.mpl_connect('button_press_event', on_click)
 
-		#plt.show(block=block) #HACKED ANTES MOSTRABA
+		plt.show(block=block) #HACKED ANTES MOSTRABA
 
 
 
@@ -1518,7 +1519,7 @@ class Car:
 
 		if self.p.type==CarType.ICEV:
 			# If the car is ICEV, it will not need to recharge
-			self.toCell=ire
+			self.toCell=[ire[0]] # HACKED QUITAR [] y [0]
 			return 
 
 		if len(ire)==0:
@@ -1566,9 +1567,10 @@ class Car:
 			calculateNext(cell)
 			toCell=self.toCell.pop(0)
 
-		if toCell.t==t or toCell.car!=None: 
-			for s in cell.semaphore:
-				s.t=t
+		if toCell.t==t or toCell.car!=None:
+			if self.p.yellowBox:
+				for s in cell.semaphore:
+					s.t=t
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
 				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1587,8 +1589,9 @@ class Car:
 		# identifica si es ilegal, no join
 		# self.checkLegalMove(cell,toCell)
 		#print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
-		for s in toCell.semaphore:
-			s.t=t
+		if self.p.yellowBox:
+			for s in toCell.semaphore:
+				s.t=t
 		self.cell = toCell
 		cell.car = None
 		toCell.car = self
@@ -1603,6 +1606,9 @@ class Car:
 			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
 			#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
 			cell.exponentialLastT=t
+		if not self.p.yellowBox:
+			for s in cell.semaphore:
+				s.t=t
 
 
 		# Calculate priority
@@ -2969,7 +2975,7 @@ class ContaminationExperiment:
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': None, 'run': None, 'all': False, 'stats': False}
+	default_values = {'list': None, 'view': None, 'run': None, 'all': False, 'stats': False, 'contamination':False}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
 	parser.add_argument('--list', action='store_true', help='List all experiments')
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
@@ -2977,7 +2983,7 @@ if __name__ == '__main__':
 	parser.add_argument('--all', action='store_true', help='Run all experiments in the background')
 	parser.add_argument('--stats', action='store_true', help='Generate meta statistics')
 	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option')
-	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments')
+	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments', default=default_values['contamination'])
 	#parser.add_argument()
 
 	# 44
