@@ -7,7 +7,7 @@ import matplotlib.animation as animation
 import matplotlib.colors as mcolors
 import random
 from collections import namedtuple
-import traceback
+#import traceback
 import math
 from enum import IntEnum
 import json
@@ -22,8 +22,11 @@ from functools import partial
 import datetime
 from scipy.optimize import minimize
 from matplotlib.colors import LinearSegmentedColormap
-import pickle
-
+from collections import Counter
+#import pickle
+#import cProfile
+#import pstats
+#import h5py
 
 
 
@@ -43,10 +46,11 @@ class Parameters:
 		viewDrawCity (bool): If true, draw the city
 	"""
 	def __init__(self):
-		self.verticalBlocks=1
-		self.horizontalBlocks=1
+		self.verticalBlocks=3
+		self.horizontalBlocks=3
 		self.numberBlocks=self.verticalBlocks*self.horizontalBlocks
 		self.numberStationsPerBlock=1# tipical 1/(numberBlocks), 1, 4
+		self.yellowBox=True
 
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
 		
@@ -443,7 +447,7 @@ class Block:
 		self.csUbicable=[]
 		self.sugar(
 			Street([ (-1,3), (3,3), (3,-1) ], 3,2), # roundabout
-			Street([ (2,6), (6,6), (6,2) ], 3,1), # New roundabout lane
+			#Street([ (2,6), (6,6), (6,2) ], 3,1), # New roundabout lane
 			# parametrizable
 			#Street([(r,3), (r,-1)],1,2), # cross
 			#Street([(-1,r),(3,r)],1,2),
@@ -655,7 +659,7 @@ class City:
 		self.p=p
 		self.indiv = indiv
 		self.block=Block(p,allocate_CS = indiv == None)
-		self.grid=Grid(p.verticalBlocks*self.block.height,p.horizontalBlocks*self.block.width)
+		self.grid=Grid(p,p.verticalBlocks*self.block.height,p.horizontalBlocks*self.block.width) #Hacked: añadido "p,"
 
 		self.t=0
 
@@ -723,12 +727,16 @@ class City:
 			height = len(acc[0])
 			#keys = [car.id for car in self.cars if car.p.type == CarType.ICEV]
 			positions = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.ICEV and car.cell is not None}
+			positions.update({car.id: [(car.target2.x,car.target2.y)]*times for car in self.cars if car.p.type == CarType.ICEV and car.cell is None})
+			aux=[len([car for car in self.cars if car.p.type == CarType.ICEV and car.cell is None])]
 			diesel = list(positions.keys())[:len(positions)//3]
 			positionsEV = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is not None}
 			positionsEV.update({car.id: [(car.target2.x,car.target2.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is None})
-			print(len(positions)+len(positionsEV))
-			print(len(positionsEV))
-			print(len(diesel))
+			print('Number of cars: ', len(positions)+len(positionsEV))
+			print('Should be: ', len(self.cars))
+			print('Number of EV: ', len(positionsEV))
+			print('Number of Petrol: ',len(positions)-len(diesel))
+			print('Number of diesel: ', len(diesel))
 			velocities = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
 			accelerations = {car.id: [0]*times for car in self.cars if car.p.type == CarType.ICEV}
 			velocitiesEV = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.EV}
@@ -778,19 +786,19 @@ class City:
 					'EV': [0, 0, 0, 0, 0, 0, 0]
 				},
 				'PM_exhaust_prueba': {
-					'Petrol': [0, 0, 3.1*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'Diesel': [0, 0, 2.4*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
+					'Petrol': [0, 0, 3.1*0.000001, 0, 0, 0, 0],#*cellsize*timestepvalue
+					'Diesel': [0, 0, 2.4*0.000001, 0, 0, 0, 0],
 					'EV': [0, 0, 0, 0, 0, 0, 0]
 				},
 				'PM_non_exhaust2_5': {
-					'Petrol': [0, 0, (23.2-3)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'Diesel': [0, 0, (22.6-2.4)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'EV': [0, 0, 22.4*0.000001*cellsize*timestepvalue, 0, 0, 0, 0]
+					'Petrol': [0, 0, (23.2-3)*0.000001, 0, 0, 0, 0],
+					'Diesel': [0, 0, (22.6-2.4)*0.000001, 0, 0, 0, 0],
+					'EV': [0, 0, 22.4*0.000001, 0, 0, 0, 0]
 				},
 				'PM_non_exhaust10': {
-					'Petrol': [0, 0, (66-3.1)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'Diesel': [0, 0, (65.3-2.4)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'EV': [0, 0, 65.7*0.000001*cellsize*timestepvalue, 0, 0, 0, 0]
+					'Petrol': [0, 0, (66-3.1)*0.000001, 0, 0, 0, 0],
+					'Diesel': [0, 0, (65.3-2.4)*0.000001, 0, 0, 0, 0],
+					'EV': [0, 0, 65.7*0.000001, 0, 0, 0, 0]
 				}
 			}
 			G = {pollutant: {'Petrol': np.zeros((width+2, height+2, times+1)),
@@ -803,7 +811,8 @@ class City:
 							'EV': np.zeros((width+2, height+2, times+1))}
 				for pollutant in ['CO2', 'NOx', 'VOC', 'PM_exhaust', 'PM_exhaust_prueba', 'PM_non_exhaust2_5', 'PM_non_exhaust10']}
 			Psum = np.zeros((width+2, height+2, times+1))
-		#print(wind)
+			#print(wind)
+			
 
 		for i in range(times):
 			try:
@@ -820,8 +829,12 @@ class City:
 					loc_fits[k] += -(len([1 for car in current_cs.car if car!=None])-len(current_cs.queue))/current_cs.numPlugins
 					#self.cars[523]
 				if returnFits or contaminationExp:
+					aux.append(len([car for car in self.cars if car.p.type == CarType.ICEV and car.cell is None]))
 					for key in positions:# for c in cars, positions[c]=...
-						positions[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
+						if self.cars[key].cell is None:
+							positions[key][i] = (self.cars[key].target2.x,self.cars[key].target2.y)
+						else:
+							positions[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
 						if i>0:
 							velocities[key][i] = (substract_tuples(positions[key][i],positions[key][i-1],5/1.8)) # Factor due to Amaro
 						if i>1:
@@ -829,18 +842,19 @@ class City:
 						vel = tuple_norm(velocities[key][i])
 						accel = accelerations[key][i]
 						a,b=positions[key][i]
-						for pollutant in G:
-							if key in diesel:
-								vehType = 'Diesel'
-							else:
-								vehType = 'Petrol'
-							pollutant2 = pollutant
-							if accel < -0.5:
-								if pollutant == 'NOx':
-									pollutant2 = 'NOx_decel'
-								if pollutant == 'VOC':
-									pollutant2 = 'VOC_decel'
-							G[pollutant][vehType][a,b,i]=max(poll_coefs[pollutant2][vehType][0], poll_coefs[pollutant2][vehType][1] + poll_coefs[pollutant2][vehType][2]*vel + poll_coefs[pollutant2][vehType][3]*vel**2 + poll_coefs[pollutant2][vehType][4]*accel + poll_coefs[pollutant2][vehType][5]*accel**2 + poll_coefs[pollutant2][vehType][6]*vel*accel)*timestepvalue
+						if self.cars[key].cell is not None:
+							for pollutant in G:
+								if key in diesel:
+									vehType = 'Diesel'
+								else:
+									vehType = 'Petrol'
+								pollutant2 = pollutant
+								if accel < -0.5:
+									if pollutant == 'NOx':
+										pollutant2 = 'NOx_decel'
+									if pollutant == 'VOC':
+										pollutant2 = 'VOC_decel'
+								G[pollutant][vehType][a,b,i]=max(poll_coefs[pollutant2][vehType][0], poll_coefs[pollutant2][vehType][1] + poll_coefs[pollutant2][vehType][2]*vel + poll_coefs[pollutant2][vehType][3]*vel**2 + poll_coefs[pollutant2][vehType][4]*accel + poll_coefs[pollutant2][vehType][5]*accel**2 + poll_coefs[pollutant2][vehType][6]*vel*accel)*timestepvalue
 
 					for key in positionsEV:
 						if self.cars[key].cell is None:
@@ -854,14 +868,15 @@ class City:
 						vel = tuple_norm(velocitiesEV[key][i])
 						accel = accelerationsEV[key][i]
 						a,b=positionsEV[key][i]
-						for pollutant in G:
-							pollutant2=pollutant
-							if accel < -0.5:
-								if pollutant == 'NOx':
-									pollutant2 = 'NOx_decel'
-								if pollutant == 'VOC':
-									pollutant2 = 'VOC_decel'
-							G[pollutant]['EV'][a,b,i]=max(poll_coefs[pollutant2]['EV'][0], poll_coefs[pollutant2]['EV'][1] + poll_coefs[pollutant2]['EV'][2]*vel + poll_coefs[pollutant2]['EV'][3]*vel**2 + poll_coefs[pollutant2]['EV'][4]*accel + poll_coefs[pollutant2]['EV'][5]*accel**2 + poll_coefs[pollutant2]['EV'][6]*vel*accel)*timestepvalue
+						if self.cars[key].cell is not None:
+							for pollutant in G:
+								pollutant2=pollutant
+								if accel < -0.5:
+									if pollutant == 'NOx':
+										pollutant2 = 'NOx_decel'
+									if pollutant == 'VOC':
+										pollutant2 = 'VOC_decel'
+								G[pollutant]['EV'][a,b,i]=max(poll_coefs[pollutant2]['EV'][0], poll_coefs[pollutant2]['EV'][1] + poll_coefs[pollutant2]['EV'][2]*vel + poll_coefs[pollutant2]['EV'][3]*vel**2 + poll_coefs[pollutant2]['EV'][4]*accel + poll_coefs[pollutant2]['EV'][5]*accel**2 + poll_coefs[pollutant2]['EV'][6]*vel*accel)*timestepvalue
 					
 					for pollutant in P:
 						for evType in P[pollutant]:
@@ -902,6 +917,8 @@ class City:
 			if returnFits or contaminationExp:
 					carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
 					#print(carsAtDestination, '\n')
+		plt.plot(range(len(aux)),aux)
+		plt.show()
 		if (returnFits or contaminationExp) and False:
 			def func(x):
 				print(time.time())
@@ -1010,7 +1027,7 @@ class City:
 			#filename = f"total_pollution_gamma_{gamma}.png"
 			filename = "total_pollution.png"
 			plt.savefig(filename)
-			plt.show()
+			#plt.show()
 			plt.close()
 			if True:#Plot?
 				def update_plot(frame_number, zarray, plot, fig, ax):
@@ -1067,7 +1084,7 @@ class City:
 				#ani.save(f"pollution_genetic_gamma_{gamma}.mp4", writer = FFwriter)
 				#ani.save(f"pollution_genetic_gamma_{gamma}.gif", writer='imagemagick', fps=5)
 				ani.save("pollution.gif", writer='imagemagick', fps=5)
-				plt.show()
+				#plt.show()
 				plt.close()
 		#filtered_dict = {key: original_dict[key] for key in keys_to_keep if key in original_dict}
 		cars = {
@@ -1075,6 +1092,8 @@ class City:
 			'Petrol': {'position': {key:positions[key] for key in  positions if key not in diesel}, 'velocity': {key:velocities[key] for key in  positions if key not in diesel}, 'acceleration': {key:accelerations[key] for key in  positions if key not in diesel}},
 			'Diesel': {'position': {key:positions[key] for key in diesel}, 'velocity': {key:velocities[key] for key in diesel}, 'acceleration': {key:accelerations[key] for key in diesel}}
 			}
+		
+		'''
 		filename = f"P_delta_{delta}_gamma_{gamma}.pkl"
 		with open(filename, 'wb') as file:
 			pickle.dump(P, file)
@@ -1084,6 +1103,54 @@ class City:
 		filename = f"cars_delta_{delta}_gamma_{gamma}.pkl"
 		with open(filename, 'wb') as file:
 			pickle.dump(cars, file)
+
+		with h5py.File('P_delta_{delta}_gamma_{gamma}.h5', 'w') as f:
+			for pollutant, vehicles in P.items():
+				for vehicle, data in vehicles.items():
+					f.create_dataset(f"{pollutant}/{vehicle}", data=data, compression='gzip')
+		with h5py.File('G_delta_{delta}_gamma_{gamma}.h5', 'w') as f:
+			for pollutant, vehicles in G.items():
+				for vehicle, data in vehicles.items():
+					f.create_dataset(f"{pollutant}/{vehicle}", data=data, compression='gzip')
+		with h5py.File('cars_delta_{delta}_gamma_{gamma}.h5', 'w') as f:
+			for vehicle, properties in cars.items():
+				for property, data in properties.items():
+					f.create_dataset(f"{vehicle}/{property}", data=data, compression='gzip')
+		'''
+
+		for pollutant in P:
+			for vehicle in P[pollutant]:
+				P[pollutant][vehicle] = P[pollutant][vehicle].astype(np.float16)
+
+		np.savez_compressed('P_delta_{delta}_gamma_{gamma}.npz', **P)
+		np.savez_compressed('G_delta_{delta}_gamma_{gamma}.npz', **G)
+		np.savez_compressed('cars_delta_{delta}_gamma_{gamma}.npz', **cars)
+
+		def compute_norms(velocity_dict):
+			norms = []
+			for velocities in velocity_dict.values():
+				norms.extend([math.sqrt(x**2 + y**2)*3.6 for x, y in velocities])
+			return norms
+		
+		all_norms = compute_norms(velocities) + compute_norms(velocitiesEV)
+		#print('maximum', np.max(all_norms))
+
+		frequency = Counter(all_norms)
+
+		# Prepare data for plotting
+		values = list(frequency.keys())
+		counts = list(frequency.values())
+
+		# Create the plot
+		plt.bar(values, counts, width=0.01, align='center', color='b', alpha=0.7)  # Small width to mimic lines
+		plt.xlabel('Value')
+		plt.ylabel('Frequency')
+		plt.title('Histogram of Discrete Values')
+		plt.xticks(values)  # Ensure all unique values are marked on x-axis
+		plt.grid(axis='y', linestyle='--', alpha=0.6)  # Optional grid for better visibility
+		plt.show()
+
+
 		new_acc = np.ones((width+2, height+2))
 		new_acc[1:-1,1:-1] = acc
 		if returnFits:
@@ -1304,7 +1371,8 @@ class Grid:
 	Also coinains several utility functions to calculate the distance between two cells, to get a random street, and 
 	to link two cells.
 	"""
-	def __init__(self, heigh, width):
+	def __init__(self, p, heigh, width): #HACKED: añadido grid
+		self.p = p
 		self.width = width
 		self.heigh = heigh
 		self.streets=0
@@ -1353,14 +1421,19 @@ class Grid:
 				self.intersections.append(target)
 			
 			#autosemaphore
-			if len(target.origin)>1:
-			#target.origin[0].semaphore.append(origin)
-			#target.origin[0].origin[0].semaphore.append(origin.origin[0])
+			if self.p.yellowBox:
 				for d in target.destination:
 					d.semaphore.append(origin)
-					# d.semaphore.append(target)
-			# if len(origin.origin)>1:
-			# 	target.semaphore.append(origin)
+			else:
+				if len(target.origin)>1:
+				#target.origin[0].semaphore.append(origin)
+				#target.origin[0].origin[0].semaphore.append(origin.origin[0])
+					
+					for d in target.destination:
+					#d.semaphore.append(origin)
+						d.semaphore.append(target)
+				if len(origin.origin)>1:
+					target.semaphore.append(origin)
 
 class Buscador:
 	def __init__(self):#,profundidad):
@@ -1520,7 +1593,7 @@ class Car:
 
 		if self.p.type==CarType.ICEV:
 			# If the car is ICEV, it will not need to recharge
-			self.toCell=ire
+			self.toCell=ire#[ire[0]] para calcular en cada movimiento
 			return 
 
 		if len(ire)==0:
@@ -1568,6 +1641,10 @@ class Car:
 			calculateNext(cell)
 			toCell=self.toCell.pop(0)
 
+		#if toCell.t==t or toCell.car!=None:
+		#	if self.p.yellowBox:
+		#		for s in cell.semaphore:
+		#			s.t=t
 		isStop=toCell.t==t or toCell.car!=None
 		if not isStop and (len(toCell.destination)>1 or len(toCell.origin)>1):
 			if 1==len(toCell.destination):
@@ -1591,6 +1668,7 @@ class Car:
 		if isStop: 
 			for s in cell.semaphore:
 				s.t=t+1
+			
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
 				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1609,8 +1687,9 @@ class Car:
 		# identifica si es ilegal, no join
 		# self.checkLegalMove(cell,toCell)
 		#print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
-		# for s in cell.semaphore:
-		# 	s.t=t
+		#if self.p.yellowBox:
+		#	for s in toCell.semaphore:
+		#		s.t=t
 		self.cell = toCell
 		cell.car = None
 		toCell.car = self
@@ -1626,6 +1705,9 @@ class Car:
 			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
 			#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
 			cell.exponentialLastT=t
+		#if not self.p.yellowBox:
+		#	for s in cell.semaphore:
+		#		s.t=t
 
 
 		# Calculate priority
@@ -2380,8 +2462,8 @@ def cartesianExperiment():
 		#aStarCSQueueQuery=[0.5],#poner el óptimo (ver paper)
 		#aStarCSReserve=[0.5],#<= que el anterior, x primeros. ¿de los que consultan, qué porcentaje reservan? comprobar
 		densityCars=[0.05,0.1,0.15],#,#añadir porcentaje de tipos
-		percentageEV=[0,0.1,0.2,0.3,0.4,0.5,0.75,1],
-		percentageICEVDiesel=[0,0.05,0.1,0.2,0.5]
+		percentageEV=[0.1,0.2,0.3,0.4,0.5,0.75,1],#[10,20,30,40,50,75,100],
+		percentageICEVDiesel=[0,5,10,20,50]#[0,0.05,0.1,0.2,0.5]
 		#aStarUseCellExponentialWeight=[0.5],#mirar cuál daba mejores resultados y usar solo ese ('0.95??)
 		#reserveCS=[False], # it has been removed because legend is too long
 	)
@@ -2812,13 +2894,14 @@ class Genetic:
 		plt.show()
 
 class ContaminationExperiment:
-	def __init__(self,numExperiment, simulation_cache={}) -> None:
-		numExperiment=43
+	def __init__(self,numExperiment=43, distribution=0) -> None:
+		numExperiment=0
 		self.numExperiment = numExperiment
+		self.distribution=distribution#should be in 0,1,2.
 		self.population_size = multiprocessing.cpu_count()
 		#self.max_num_stations = 5
-		self.num_chargers = 2
-		self.num_timesteps = 100
+		self.num_chargers = 72
+		self.num_timesteps = 2000
 		numExperiment=0
 		p=cartesianExperiment()[numExperiment]
 		p.listgenerator=True
@@ -2828,7 +2911,7 @@ class ContaminationExperiment:
 		for k in g:
 			print(k)
 			break
-		self.distance = lambda x,y: self.aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
+		#self.distance = lambda x,y: self.aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
 		self.valid_coordinates = city1.listgenerator
 
 		#print((140,144) in self.valid_coordinates)
@@ -2879,12 +2962,14 @@ class ContaminationExperiment:
 		(n_rows, n_cols) = city1.sizes
 		self.delta = 0.1  # Diffusion parameter
 		self.corner_factor = 1#/np.sqrt(2)
-		self.gamma = 0.00 # Lost to the atmosphere
+		self.gamma = 0.01 # Lost to the atmosphere
 		acc = np.zeros((n_rows+2, n_cols+2))
 		for x,y in self.valid_coordinates:
 			acc[x,y] = 1
+
+		sidewalk = False
 		
-		if True:
+		if sidewalk:
 			acc[45:52,:]=1
 			acc[:,45:52]=1
 			acc[141:148,:]=1
@@ -2915,7 +3000,7 @@ class ContaminationExperiment:
 			acc[2:, 0:-2] + acc[0:-2, 2:]
 		)
 
-		if True: #Aceras
+		if sidewalk: #Aceras
 			for i in range(1,n_rows+1):
 				for j in range(1,n_cols+1):
 					if acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]:
@@ -2972,17 +3057,26 @@ class ContaminationExperiment:
 					displ_SW[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q + 1]
 		stays += -(displ_N + displ_S + displ_E + displ_W + displ_NE + displ_NW + displ_SE + displ_SW)
 		self.wind = (displ_N[1:-1, 2:, :], displ_S[1:-1, :-2, :], displ_E[:-2, 1:-1, :], displ_W[2:, 1:-1, :], displ_NE[:-2, 2:, :], displ_NW[2:, 2:, :], displ_SE[:-2, :-2, :], displ_SW[2:, :-2, :], stays[1:-1, 1:-1, :])
-		self.simulation_cache = simulation_cache
 
 	def run(self):
-		#individual = Individual([GChargingStation((140,144),self.num_chargers)])
-		#individual = Individual([GChargingStation((51,65),self.num_chargers), GChargingStation((51,224),self.num_chargers), GChargingStation((220,51),self.num_chargers), GChargingStation((220,237),self.num_chargers)])
-		individual = Individual([GChargingStation((31,32),self.num_chargers), GChargingStation((31,64),self.num_chargers), GChargingStation((31,128),self.num_chargers), GChargingStation((31,160),self.num_chargers), GChargingStation((31,224),self.num_chargers), GChargingStation((31,256),self.num_chargers),
-						   GChargingStation((64,31),self.num_chargers), GChargingStation((64,64),self.num_chargers), GChargingStation((64,127),self.num_chargers), GChargingStation((64,160),self.num_chargers), GChargingStation((64,223),self.num_chargers), GChargingStation((64,256),self.num_chargers),
-						   GChargingStation((127,32),self.num_chargers), GChargingStation((127,64),self.num_chargers), GChargingStation((127,128),self.num_chargers), GChargingStation((127,160),self.num_chargers), GChargingStation((127,224),self.num_chargers), GChargingStation((127,256),self.num_chargers),
-						   GChargingStation((160,31),self.num_chargers), GChargingStation((160,64),self.num_chargers), GChargingStation((160,127),self.num_chargers), GChargingStation((160,160),self.num_chargers), GChargingStation((160,223),self.num_chargers), GChargingStation((160,256),self.num_chargers),
-						   GChargingStation((223,32),self.num_chargers), GChargingStation((223,64),self.num_chargers), GChargingStation((223,128),self.num_chargers), GChargingStation((223,160),self.num_chargers), GChargingStation((223,224),self.num_chargers), GChargingStation((223,256),self.num_chargers),
-						   GChargingStation((256,31),self.num_chargers), GChargingStation((256,64),self.num_chargers), GChargingStation((256,127),self.num_chargers), GChargingStation((256,160),self.num_chargers), GChargingStation((256,223),self.num_chargers), GChargingStation((256,256),self.num_chargers)])
+		individual1 = Individual([GChargingStation((137,142),self.num_chargers)])#Individual([GChargingStation((140,144),self.num_chargers)])
+		#individual2 = Individual([GChargingStation((51,65),self.num_chargers//4), GChargingStation((51,224),self.num_chargers//4), GChargingStation((220,51),self.num_chargers//4), GChargingStation((220,237),self.num_chargers//4)])
+		individual2 = Individual([GChargingStation((213,45),self.num_chargers//4), GChargingStation((45,74),self.num_chargers//4), GChargingStation((74,243),self.num_chargers//4), GChargingStation((243,213),self.num_chargers//4)])
+		#individual3 = Individual([GChargingStation((31,32),self.num_chargers//36), GChargingStation((31,64),self.num_chargers//36), GChargingStation((31,128),self.num_chargers//36), GChargingStation((31,160),self.num_chargers//36), GChargingStation((31,224),self.num_chargers//36), GChargingStation((31,256),self.num_chargers//36),
+		#				   GChargingStation((64,31),self.num_chargers//36), GChargingStation((64,64),self.num_chargers//36), GChargingStation((64,127),self.num_chargers//36), GChargingStation((64,160),self.num_chargers//36), GChargingStation((64,223),self.num_chargers//36), GChargingStation((64,256),self.num_chargers//36),
+		#				   GChargingStation((127,32),self.num_chargers//36), GChargingStation((127,64),self.num_chargers//36), GChargingStation((127,128),self.num_chargers//36), GChargingStation((127,160),self.num_chargers//36), GChargingStation((127,224),self.num_chargers//36), GChargingStation((127,256),self.num_chargers//36),
+		#				   GChargingStation((160,31),self.num_chargers//36), GChargingStation((160,64),self.num_chargers//36), GChargingStation((160,127),self.num_chargers//36), GChargingStation((160,160),self.num_chargers//36), GChargingStation((160,223),self.num_chargers//36), GChargingStation((160,256),self.num_chargers//36),
+		#				   GChargingStation((223,32),self.num_chargers//36), GChargingStation((223,64),self.num_chargers//36), GChargingStation((223,128),self.num_chargers//36), GChargingStation((223,160),self.num_chargers//36), GChargingStation((223,224),self.num_chargers//36), GChargingStation((223,256),self.num_chargers//36),
+		#				   GChargingStation((256,31),self.num_chargers//36), GChargingStation((256,64),self.num_chargers//36), GChargingStation((256,127),self.num_chargers//36), GChargingStation((256,160),self.num_chargers//36), GChargingStation((256,223),self.num_chargers//36), GChargingStation((256,256),self.num_chargers//36)])
+		individual3 = Individual([GChargingStation((45,21),self.num_chargers//36), GChargingStation((45,117),self.num_chargers//36), GChargingStation((45,213),self.num_chargers//36), GChargingStation((51,74),self.num_chargers//36), GChargingStation((51,170),self.num_chargers//36), GChargingStation((51,266),self.num_chargers//36),
+						GChargingStation((141,21),self.num_chargers//36), GChargingStation((141,117),self.num_chargers//36), GChargingStation((141,213),self.num_chargers//36), GChargingStation((147,74),self.num_chargers//36), GChargingStation((147,170),self.num_chargers//36), GChargingStation((147,266),self.num_chargers//36),
+						GChargingStation((237,21),self.num_chargers//36), GChargingStation((237,117),self.num_chargers//36), GChargingStation((237,213),self.num_chargers//36), GChargingStation((243,74),self.num_chargers//36), GChargingStation((243,170),self.num_chargers//36), GChargingStation((243,266),self.num_chargers//36),
+						GChargingStation((21,51),self.num_chargers//36), GChargingStation((74,45),self.num_chargers//36), GChargingStation((117,51),self.num_chargers//36), GChargingStation((170,45),self.num_chargers//36), GChargingStation((213,51),self.num_chargers//36), GChargingStation((266,45),self.num_chargers//36),
+						GChargingStation((21,147),self.num_chargers//36), GChargingStation((74,141),self.num_chargers//36), GChargingStation((117,147),self.num_chargers//36), GChargingStation((170,141),self.num_chargers//36), GChargingStation((213,147),self.num_chargers//36), GChargingStation((266,141),self.num_chargers//36),
+						GChargingStation((21,243),self.num_chargers//36), GChargingStation((74,237),self.num_chargers//36), GChargingStation((117,243),self.num_chargers//36), GChargingStation((170,237),self.num_chargers//36), GChargingStation((213,243),self.num_chargers//36), GChargingStation((266,237),self.num_chargers//36)])
+		
+		individuals = [individual1,individual2,individual3]
+		individual = individuals[self.distribution]
 		# returnFits must be false so that contaminationExp is used.
 		experiment(self.numExperiment,view=False,cache=False, indiv = individual, returnFits = False, contaminationExp = True, numTimesteps = self.num_timesteps, delta = self.delta, corner_factor = self.corner_factor, gamma = self.gamma, acc = self.acc, dif_matrix = self.dif_matrix, wind = self.wind)
 
@@ -2992,7 +3086,7 @@ class ContaminationExperiment:
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': 43, 'run': None, 'all': False, 'stats': False,'contamination':False, 'genetic':False}
+	default_values = {'list': None, 'view': None, 'run': 43, 'all': False, 'stats': False,'contamination':True, 'genetic':False}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
 	parser.add_argument('--list', action='store_true', help='List all experiments', default=default_values['list'])
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
@@ -3037,9 +3131,11 @@ if __name__ == '__main__':
 				g.run()
 			else:
 				#for gamma in [0.05, 0.1, 0.2]:#0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2]:#0.00, 0.01, 0.02, 0.03, 0.04,
-					g = ContaminationExperiment(args.run)
+					g = ContaminationExperiment(numExperiment=args.run)
 				#	g.gamma=gamma
 					g.run()
+
+
 
 		if args.all:
 			start_time = time.time()
