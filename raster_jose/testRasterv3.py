@@ -6,6 +6,12 @@ log = False
 showGrid = True
 raster = Raster("raster_jose//maps", f"raster_jose//savesRasterV3//{file_name.split('.')[0]}", file_name, log=log, showGrid=showGrid)
 raster.getData()
+
+'''
+Para guardar los datos en formato: x,y,vecino1,...,venicnoN
+Descomentar la siguiente línea.
+'''
+# raster.saveDataStructureCity() 
 # links = raster.dfLinks
 # nodes = raster.dfNodes
 
