@@ -7,7 +7,7 @@ import matplotlib.animation as animation
 import matplotlib.colors as mcolors
 import random
 from collections import namedtuple
-import traceback
+#import traceback
 import math
 from enum import IntEnum
 import json
@@ -20,10 +20,15 @@ from typing import List, Tuple, Callable
 import itertools
 from functools import partial
 import datetime
-from scipy.optimize import minimize
+#from scipy.optimize import minimize
 from matplotlib.colors import LinearSegmentedColormap
-import pickle
-
+from collections import Counter
+import gc
+#import psutil
+#import pickle
+#import cProfile
+#import pstats
+#import h5py
 
 
 
@@ -51,8 +56,13 @@ class Parameters:
 
 		self.numberStations=self.numberStationsPerBlock*self.numberBlocks
 		
-		self.percentageEV=0.5
-		self.percentageICEVDiesel=0.1
+		self.densityEV=0.5
+		self.densityDiesel=0.1
+		self.densityPetrol=1-self.densityEV-self.densityDiesel
+		self.buildings=True
+		self.distributionCS=1
+		self.windV=(0.1,0)
+		self.pollutionRouting = False
 
 		self.numberChargersPerBlock=1
 
@@ -165,7 +175,102 @@ class CarType(IntEnum):
 	The EV type go to charging station when the battery is low. 
 	'''
 	EV = 0
-	ICEV = 1
+	Petrol = 1
+	Diesel = 2
+'''
+poll_coefs = {
+	'CO2': {
+		CarType.Petrol: [0, 0.553, 0.161, -0.00289, 0.266, 0.511, 0.183],
+		CarType.Diesel: [0, 0.324, 0.0859, 0.00496, -0.0586, 0.448, 0.23],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'NOx': {
+		CarType.Petrol: [0, 0.000619, 8e-05, -4.03e-06, -0.000413, 0.00038, 0.000177],
+		CarType.Diesel: [0, 0.00241, -0.000411, 6.73e-05, -0.00307, 0.00214, 0.0015],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'NOxdecel': {
+		CarType.Petrol: [0, 2.17e-4, 0, 0, 0, 0, 0],
+		CarType.Diesel: [0, 1.68e-03, -6.62e-05, 9.00e-06, 2.50e-04, 2.91e-04, 1.20e-04],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'VOC': {
+		CarType.Petrol: [0, 0.00447, 7.32e-07, -2.87e-08, -3.41e-06, 4.94e-06, 1.66e-06],
+		CarType.Diesel: [0, 9.22e-05, 9.09e-06, -2.29e-07, -2.2e-05, 1.69e-05, 3.75e-06],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'VOCdecel': {
+		CarType.Petrol: [0, 2.63e-3, 0, 0, 0, 0, 0],
+		CarType.Diesel: [0, 5.25e-05, 7.22e-06, -1.87e-07, 0, -1.02e-05, -4.22e-06],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'PMexhaust': {
+		CarType.Petrol: [0, 0.0, 1.57e-05, -9.21e-07, 0.0, 3.75e-05, 1.89e-05],
+		CarType.Diesel: [0, 0.0, 0.000313, -1.84e-05, 0.0, 0.00075, 0.000378],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'PMexhaustprueba': {
+		CarType.Petrol: [0, 0, 3.1*0.000001, 0, 0, 0, 0],#*cellsize*timestepvalue
+		CarType.Diesel: [0, 0, 2.4*0.000001, 0, 0, 0, 0],
+		CarType.EV: [0, 0, 0, 0, 0, 0, 0]
+	},
+	'PMnonexhaust25': {
+		CarType.Petrol: [0, 0, (23.2-3)*0.000001, 0, 0, 0, 0],
+		CarType.Diesel: [0, 0, (22.6-2.4)*0.000001, 0, 0, 0, 0],
+		CarType.EV: [0, 0, 22.4*0.000001, 0, 0, 0, 0]
+	},
+	'PMnonexhaust10': {
+		CarType.Petrol: [0, 0, (66-3.1)*0.000001, 0, 0, 0, 0],
+		CarType.Diesel: [0, 0, (65.3-2.4)*0.000001, 0, 0, 0, 0],
+		CarType.EV: [0, 0, 65.7*0.000001, 0, 0, 0, 0]
+	}
+}
+'''
+
+poll_coefs = {
+    CarType.Petrol: {
+        'CO2': [0, 0.553, 0.161, -0.00289, 0.266, 0.511, 0.183],
+        'NOx': [0, 0.000619, 8e-05, -4.03e-06, -0.000413, 0.00038, 0.000177],
+        'NOxdecel': [0, 2.17e-4, 0, 0, 0, 0, 0],
+        'VOC': [0, 0.00447, 7.32e-07, -2.87e-08, -3.41e-06, 4.94e-06, 1.66e-06],
+        'VOCdecel': [0, 2.63e-3, 0, 0, 0, 0, 0],
+        'PMexhaust': [0, 0.0, 1.57e-05, -9.21e-07, 0.0, 3.75e-05, 1.89e-05],
+        'PMexhaustprueba': [0, 0, 3.1*0.000001, 0, 0, 0, 0],
+        'PMnonexhaust25': [0, 0, (23.2-3)*0.000001, 0, 0, 0, 0],
+        'PMnonexhaust10': [0, 0, (66-3.1)*0.000001, 0, 0, 0, 0]
+    },
+    CarType.Diesel: {
+        'CO2': [0, 0.324, 0.0859, 0.00496, -0.0586, 0.448, 0.23],
+        'NOx': [0, 0.00241, -0.000411, 6.73e-05, -0.00307, 0.00214, 0.0015],
+        'NOxdecel': [0, 1.68e-03, -6.62e-05, 9.00e-06, 2.50e-04, 2.91e-04, 1.20e-04],
+        'VOC': [0, 9.22e-05, 9.09e-06, -2.29e-07, -2.2e-05, 1.69e-05, 3.75e-06],
+        'VOCdecel': [0, 5.25e-05, 7.22e-06, -1.87e-07, 0, -1.02e-05, -4.22e-06],
+        'PMexhaust': [0, 0.0, 0.000313, -1.84e-05, 0.0, 0.00075, 0.000378],
+        'PMexhaustprueba': [0, 0, 2.4*0.000001, 0, 0, 0, 0],
+        'PMnonexhaust25': [0, 0, (22.6-2.4)*0.000001, 0, 0, 0, 0],
+        'PMnonexhaust10': [0, 0, (65.3-2.4)*0.000001, 0, 0, 0, 0]
+    },
+    CarType.EV: {
+        'PMnonexhaust25': [0, 0, 22.4*0.000001, 0, 0, 0, 0],
+        'PMnonexhaust10': [0, 0, 65.7*0.000001, 0, 0, 0, 0]
+    }
+}
+
+for car_type, pollutants in poll_coefs.items():
+    for pollutant, values in pollutants.items():
+        poll_coefs[car_type][pollutant] = [np.float32(v) if v != 0 else 0 for v in values]
+
+
+class CarProperties:
+	def __init__(self,typeCar,needsCharging):
+		self.typeCar = typeCar
+		self.needsCharging = needsCharging
+		self.density = 0
+		self.number = 0
+		self.contaminationCoef = poll_coefs[self.typeCar]
+		#AÑADIR CONTAMINACIÓN AQUÍ
+
+CAR_PROPERTIES = {CarType.EV: CarProperties(CarType.EV,True), CarType.Petrol: CarProperties(CarType.Petrol,False), CarType.Diesel: CarProperties(CarType.Diesel,False)}
 
 class ChargingStation:
 	"""
@@ -327,6 +432,7 @@ class Cell:
 		self.car=None
 		self.cs=None
 		self.t=0
+		self.t0=0
 		self.tCache=0 # time in with cached is calculated
 		self.timeCache=None # time of the calculation
 		self.semaphore=[] # if there is a car over then close the cells in list
@@ -443,7 +549,7 @@ class Block:
 		self.csUbicable=[]
 		self.sugar(
 			Street([ (-1,3), (3,3), (3,-1) ], 3,2), # roundabout
-			Street([ (2,6), (6,6), (6,2) ], 3,1), # New roundabout lane
+			#Street([ (2,6), (6,6), (6,2) ], 3,1), # New roundabout lane
 			# parametrizable
 			#Street([(r,3), (r,-1)],1,2), # cross
 			#Street([(-1,r),(3,r)],1,2),
@@ -655,7 +761,7 @@ class City:
 		self.p=p
 		self.indiv = indiv
 		self.block=Block(p,allocate_CS = indiv == None)
-		self.grid=Grid(p.verticalBlocks*self.block.height,p.horizontalBlocks*self.block.width)
+		self.grid=Grid(p,p.verticalBlocks*self.block.height,p.horizontalBlocks*self.block.width) #Hacked: añadido "p,"
 
 		self.t=0
 
@@ -710,389 +816,631 @@ class City:
 
 
 
-	def runWithoutPlot(self, times, returnFits = False, contaminationExp = False, delta = 0.1, corner_factor = 1, gamma = 0.1, acc = None, dif_matrix = None, wind = None):
-		initial_time = time.time()
-		next(self.city_generator)
-		if returnFits or contaminationExp:
-			timestepvalue=1.8
-			cellsize=5
-			num_cs = len(self.grid.cs)
-			loc_fits = [0] * num_cs
-			carsAtDestination = 0
-			width = len(acc)
-			height = len(acc[0])
-			#keys = [car.id for car in self.cars if car.p.type == CarType.ICEV]
-			positions = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.ICEV and car.cell is not None}
-			diesel = list(positions.keys())[:len(positions)//3]
-			positionsEV = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is not None}
-			positionsEV.update({car.id: [(car.target2.x,car.target2.y)]*times for car in self.cars if car.p.type == CarType.EV and car.cell is None})
-			print(len(positions)+len(positionsEV))
-			print(len(positionsEV))
-			print(len(diesel))
-			velocities = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
-			accelerations = {car.id: [0]*times for car in self.cars if car.p.type == CarType.ICEV}
-			velocitiesEV = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.EV}
-			accelerationsEV = {car.id: [0]*times for car in self.cars if car.p.type == CarType.EV}
-			def substract_tuples(a,b,factor):
-				aux = ((a[0]-b[0])*factor,(a[1]-b[1])*factor)
-				if a[0]-b[0]>0.5*width:
-					aux = (aux[0]-width*factor,aux[1])
-				if a[0]-b[0]<-0.5*width:
-					aux = (aux[0]+width*factor,aux[1])
-				if a[1]-b[1]>0.5*height:
-					aux = (aux[0],aux[1]-height*factor)
-				if a[1]-b[1]<-0.5*height:
-					aux = (aux[0],aux[1]+height*factor)
-				return aux
-			def tuple_norm(a):
-					return np.sqrt(a[0]**2+a[1]**2)
-			poll_coefs = {
-				'CO2': {
-					'Petrol': [0, 0.553, 0.161, -0.00289, 0.266, 0.511, 0.183],
-					'Diesel': [0, 0.324, 0.0859, 0.00496, -0.0586, 0.448, 0.23],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'NOx': {
-					'Petrol': [0, 0.000619, 8e-05, -4.03e-06, -0.000413, 0.00038, 0.000177],
-					'Diesel': [0, 0.00241, -0.000411, 6.73e-05, -0.00307, 0.00214, 0.0015],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'NOx_decel': {
-					'Petrol': [0, 2.17e-4, 0, 0, 0, 0, 0],
-					'Diesel': [0, 1.68e-03, -6.62e-05, 9.00e-06, 2.50e-04, 2.91e-04, 1.20e-04],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'VOC': {
-					'Petrol': [0, 0.00447, 7.32e-07, -2.87e-08, -3.41e-06, 4.94e-06, 1.66e-06],
-					'Diesel': [0, 9.22e-05, 9.09e-06, -2.29e-07, -2.2e-05, 1.69e-05, 3.75e-06],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'VOC_decel': {
-					'Petrol': [0, 2.63e-3, 0, 0, 0, 0, 0],
-					'Diesel': [0, 5.25e-05, 7.22e-06, -1.87e-07, 0, -1.02e-05, -4.22e-06],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'PM_exhaust': {
-					'Petrol': [0, 0.0, 1.57e-05, -9.21e-07, 0.0, 3.75e-05, 1.89e-05],
-					'Diesel': [0, 0.0, 0.000313, -1.84e-05, 0.0, 0.00075, 0.000378],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'PM_exhaust_prueba': {
-					'Petrol': [0, 0, 3.1*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'Diesel': [0, 0, 2.4*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'EV': [0, 0, 0, 0, 0, 0, 0]
-				},
-				'PM_non_exhaust2_5': {
-					'Petrol': [0, 0, (23.2-3)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'Diesel': [0, 0, (22.6-2.4)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'EV': [0, 0, 22.4*0.000001*cellsize*timestepvalue, 0, 0, 0, 0]
-				},
-				'PM_non_exhaust10': {
-					'Petrol': [0, 0, (66-3.1)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'Diesel': [0, 0, (65.3-2.4)*0.000001*cellsize*timestepvalue, 0, 0, 0, 0],
-					'EV': [0, 0, 65.7*0.000001*cellsize*timestepvalue, 0, 0, 0, 0]
-				}
-			}
-			G = {pollutant: {'Petrol': np.zeros((width+2, height+2, times+1)),
-							'Diesel': np.zeros((width+2, height+2, times+1)),
-							'EV': np.zeros((width+2, height+2, times+1))}
-				for pollutant in ['CO2', 'NOx', 'VOC', 'PM_exhaust', 'PM_exhaust_prueba', 'PM_non_exhaust2_5', 'PM_non_exhaust10']}#'PM_exhaust_prueba', 
+	def runWithoutPlot(self, times, returnFits = False, contaminationExp = False, delta = 0.1, corner_factor = 1, gamma = 0.1, acc = None, dif_matrix = None, wind = None, names = None):
+		constantWind=True
+		if constantWind:
+			initial_time = time.time()
+			savedTimes=40
+			next(self.city_generator)
+			if returnFits or contaminationExp:
+				timestepvalue=np.float32(1.8)
+				cellsize=5
+				num_cs = len(self.grid.cs)
+				loc_fits = [0] * num_cs
+				carsAtDestination = 0
+				width = len(acc)
+				height = len(acc[0])
+				positions = {cartype : {car.id: [(car.cell.x,car.cell.y)]*(times+1) for car in self.cars if car.p.type == cartype and car.cell is not None} for cartype in CAR_PROPERTIES}
+				positions[CarType.EV].update({car.id: [(car.target2.x,car.target2.y)]*(times+1) for car in self.cars if car.p.type == CarType.EV and car.cell is None}) #CORREGIR A LOS QUE PUEDAN CARGAR
+				velocities = {cartype : {car.id: [0]*(times+1) for car in self.cars if car.p.type == cartype} for cartype in CAR_PROPERTIES}
+				accelerations = {cartype : {car.id: [0]*(times+1) for car in self.cars if car.p.type == cartype} for cartype in CAR_PROPERTIES}
+				def substract_tuples(a,b,factor):
+					aux = ((a[0]-b[0])*factor,(a[1]-b[1])*factor)
+					if a[0]-b[0]>0.5*width:
+						aux = (aux[0]-width*factor,aux[1])
+					if a[0]-b[0]<-0.5*width:
+						aux = (aux[0]+width*factor,aux[1])
+					if a[1]-b[1]>0.5*height:
+						aux = (aux[0],aux[1]-height*factor)
+					if a[1]-b[1]<-0.5*height:
+						aux = (aux[0],aux[1]+height*factor)
+					return aux
+				def tuple_norm(a):
+						return np.sqrt(a[0]**2+a[1]**2)
 
-			P = {pollutant: {'Petrol': np.zeros((width+2, height+2, times+1)),
-							'Diesel': np.zeros((width+2, height+2, times+1)),
-							'EV': np.zeros((width+2, height+2, times+1))}
-				for pollutant in ['CO2', 'NOx', 'VOC', 'PM_exhaust', 'PM_exhaust_prueba', 'PM_non_exhaust2_5', 'PM_non_exhaust10']}
-			Psum = np.zeros((width+2, height+2, times+1))
-		#print(wind)
+				G = {f"{cartype}_{pollutant}": np.zeros((width, height), dtype=np.float32)
+							for cartype in CAR_PROPERTIES
+							for pollutant in poll_coefs[cartype]
+							if pollutant != 'NOxdecel' and pollutant != 'VOCdecel'}
 
-		for i in range(times):
-			try:
-				#for pollutant in P:
-				#	for evType in P[pollutant]:
-				#		Psum[:,:,i] += P[pollutant][evType][:,:,i]
-				for k in range(width):
-					for j in range(height):
-						self.grid.grid[k,j].pollutionLevel = 0.5*(Psum[k,j,i] + self.grid.grid[k,j].pollutionLevel)
-				if i>0:
-					next(self.city_generator)
-				for k in range(num_cs):
-					current_cs = self.grid.cs[k]
-					loc_fits[k] += -(len([1 for car in current_cs.car if car!=None])-len(current_cs.queue))/current_cs.numPlugins
-					#self.cars[523]
-				if returnFits or contaminationExp:
-					for key in positions:# for c in cars, positions[c]=...
-						positions[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
-						if i>0:
-							velocities[key][i] = (substract_tuples(positions[key][i],positions[key][i-1],5/1.8)) # Factor due to Amaro
-						if i>1:
-							accelerations[key][i] = (tuple_norm(velocities[key][i])-tuple_norm(velocities[key][i-1]))/1.8
-						vel = tuple_norm(velocities[key][i])
-						accel = accelerations[key][i]
-						a,b=positions[key][i]
-						for pollutant in G:
-							if key in diesel:
-								vehType = 'Diesel'
-							else:
-								vehType = 'Petrol'
-							pollutant2 = pollutant
-							if accel < -0.5:
-								if pollutant == 'NOx':
-									pollutant2 = 'NOx_decel'
-								if pollutant == 'VOC':
-									pollutant2 = 'VOC_decel'
-							G[pollutant][vehType][a,b,i]=max(poll_coefs[pollutant2][vehType][0], poll_coefs[pollutant2][vehType][1] + poll_coefs[pollutant2][vehType][2]*vel + poll_coefs[pollutant2][vehType][3]*vel**2 + poll_coefs[pollutant2][vehType][4]*accel + poll_coefs[pollutant2][vehType][5]*accel**2 + poll_coefs[pollutant2][vehType][6]*vel*accel)*timestepvalue
+				P = {f"{cartype}_{pollutant}": np.zeros((width+2, height+2), dtype=np.float32)
+							for cartype in CAR_PROPERTIES
+							for pollutant in poll_coefs[cartype]
+							if pollutant != 'NOxdecel' and pollutant != 'VOCdecel'}
 
-					for key in positionsEV:
-						if self.cars[key].cell is None:
-							positionsEV[key][i] = (self.cars[key].target2.x,self.cars[key].target2.y)
-						else:
-							positionsEV[key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)
-						if i>0:
-							velocitiesEV[key][i] = (substract_tuples(positionsEV[key][i],positionsEV[key][i-1],5/1.8)) # Factor due to Amaro
-						if i>1:
-							accelerationsEV[key][i] = (tuple_norm(velocitiesEV[key][i])-tuple_norm(velocitiesEV[key][i-1]))/1.8
-						vel = tuple_norm(velocitiesEV[key][i])
-						accel = accelerationsEV[key][i]
-						a,b=positionsEV[key][i]
-						for pollutant in G:
-							pollutant2=pollutant
-							if accel < -0.5:
-								if pollutant == 'NOx':
-									pollutant2 = 'NOx_decel'
-								if pollutant == 'VOC':
-									pollutant2 = 'VOC_decel'
-							G[pollutant]['EV'][a,b,i]=max(poll_coefs[pollutant2]['EV'][0], poll_coefs[pollutant2]['EV'][1] + poll_coefs[pollutant2]['EV'][2]*vel + poll_coefs[pollutant2]['EV'][3]*vel**2 + poll_coefs[pollutant2]['EV'][4]*accel + poll_coefs[pollutant2]['EV'][5]*accel**2 + poll_coefs[pollutant2]['EV'][6]*vel*accel)*timestepvalue
-					
-					for pollutant in P:
-						for evType in P[pollutant]:
+				savedG = {f"{cartype}_{pollutant}": np.zeros((width, height, savedTimes+1), dtype=np.float32)
+							for cartype in CAR_PROPERTIES
+							for pollutant in poll_coefs[cartype]
+							if pollutant != 'NOxdecel' and pollutant != 'VOCdecel'}
+
+				savedP = {f"{cartype}_{pollutant}": np.zeros((width, height,savedTimes+1), dtype=np.float32)
+							for cartype in CAR_PROPERTIES
+							for pollutant in poll_coefs[cartype]
+							if pollutant != 'NOxdecel' and pollutant != 'VOCdecel'}
+				
+				averages = {}
+				for key in P:
+					averages[f"P_{key}"] = np.zeros((width, height))
+					averages[f"G_{key}"] = np.zeros((width, height))
+
+				map_cars = {}
+
+				# Populate the dictionary using a loop
+				for cartype in CAR_PROPERTIES:
+					map_cars[f"{cartype}_positions"] = np.zeros((width, height, savedTimes+1))
+					map_cars[f"{cartype}_velocities"] = np.zeros((width, height, savedTimes+1))
+					map_cars[f"{cartype}_accelerations"] = np.zeros((width, height, savedTimes+1))
+					map_cars[f"{cartype}_braking"] = np.zeros((width, height, savedTimes+1))
+
+				for key in map_cars:
+					averages[f"cars_{key}"] = np.zeros((width, height))
+
+				aux=np.zeros_like(P[f"1_CO2"])
+
+			for i in range(times+1):
+				try:
+					#print(i)
+					n = i-times//4
+					isave = i%(times//savedTimes)==0
+					isaved = min(savedTimes,i//(times//savedTimes))
+					for key in G:
+						G[key][:,:]=0
+					if i==0:
+						for k in range(width):
+							for j in range(height):
+								self.grid.grid[k,j].pollutionLevel = 0
+					#for pollutant in P:
+					#	for evType in P[pollutant]:
+					#		Psum[:,:,i] += P[cartype][pollutant][:,:,i]
+					if names[-1]:
+						for k in range(width):
+							for j in range(height):
+								self.grid.grid[k,j].pollutionLevel = 0.5*(sum([P[f"{cartype}_CO2"][k+1,j+1] for cartype in CAR_PROPERTIES if cartype != CarType.EV]) + self.grid.grid[k,j].pollutionLevel) #CAMBIAR A NEEDSCHARGING
+					if i>0:
+						next(self.city_generator)
+					if returnFits or contaminationExp:
+						for cartype in positions:
+							if n>=0:
+								averages[f"cars_{cartype}_positions"]*=n/(n+1)
+								averages[f"cars_{cartype}_velocities"]*=n/(n+1)
+								averages[f"cars_{cartype}_accelerations"]*=n/(n+1)
+								averages[f"cars_{cartype}_braking"]*=n/(n+1)
+							for key in positions[cartype]:
+								if self.cars[key].cell is None:
+									positions[cartype][key][i] = (self.cars[key].target2.x,self.cars[key].target2.y)
+								else:
+									positions[cartype][key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
+								if i>0:
+									velocities[cartype][key][i] = tuple_norm(substract_tuples(positions[cartype][key][i],positions[cartype][key][i-1],cellsize/timestepvalue)) # Factor due to Amaro
+								vel = velocities[cartype][key][i]
+								if i>1:
+									accelerations[cartype][key][i] = (vel-velocities[cartype][key][i-1])/timestepvalue
+								accel = accelerations[cartype][key][i]
+								a,b=positions[cartype][key][i]
+								if isave:
+									map_cars[f"{cartype}_positions"][a,b,isaved]+=1
+									map_cars[f"{cartype}_velocities"][a,b,isaved]+=vel
+									if accel>0:
+										map_cars[f"{cartype}_accelerations"][a,b,isaved]+=accel
+									else:
+										map_cars[f"{cartype}_braking"][a,b,isaved]-=accel
+								if n>=0:
+									averages[f"cars_{cartype}_positions"][a,b] += 1/(n+1)
+									averages[f"cars_{cartype}_velocities"][a,b] += vel/(n+1)
+									if accel>0:
+										averages[f"cars_{cartype}_accelerations"][a,b] += accel/(n+1)
+									else:
+										averages[f"cars_{cartype}_braking"][a,b] -= accel/(n+1)
+								if self.cars[key].cell is not None:
+									for key in G:
+										if key.startswith(f"{cartype}_"):
+											pollutant = key.split(f"{cartype}_")[1]
+											pollutant2 = pollutant
+											if accel < -0.5:
+												if pollutant == 'NOx':
+													pollutant2 = 'NOxdecel'
+												if pollutant == 'VOC':
+													pollutant2 = 'VOCdecel'
+											G[f"{cartype}_{pollutant}"][a,b]=max(poll_coefs[cartype][pollutant2][0], poll_coefs[cartype][pollutant2][1] + poll_coefs[cartype][pollutant2][2]*vel + poll_coefs[cartype][pollutant2][3]*vel**2 + poll_coefs[cartype][pollutant2][4]*accel + poll_coefs[cartype][pollutant2][5]*accel**2 + poll_coefs[cartype][pollutant2][6]*vel*accel)*timestepvalue
+
+						for key in P:
 							diffusion_edge = (
-								P[pollutant][evType][0:-2, 1:-1, i] + P[pollutant][evType][2:, 1:-1, i] +    # Left and Right
-								P[pollutant][evType][1:-1, 0:-2, i] + P[pollutant][evType][1:-1, 2:, i]      # Up and Down
+								P[key][0:-2, 1:-1] + P[key][2:, 1:-1] +    # Left and Right
+								P[key][1:-1, 0:-2] + P[key][1:-1, 2:]      # Up and Down
 							)
 							diffusion_corner = (
-								P[pollutant][evType][0:-2, 0:-2, i] + P[pollutant][evType][2:, 2:, i] +      # Diagonals
-								P[pollutant][evType][2:, 0:-2, i] + P[pollutant][evType][0:-2, 2:, i]        # Diagonals
+								P[key][0:-2, 0:-2] + P[key][2:, 2:] +      # Diagonals
+								P[key][2:, 0:-2] + P[key][0:-2, 2:]        # Diagonals
 							)
-							#aux=np.sum(P[pollutant][evType][1:-1, 1:-1, i])
-							#print(aux*(1-delta)+delta*np.sum(diffusion_corner+diffusion_edge)/8-np.sum(P[pollutant][evType][1:-1, 1:-1, i]))
-							P[pollutant][evType][1:-1, 1:-1, i] = acc * (dif_matrix * P[pollutant][evType][1:-1, 1:-1, i] + delta * (diffusion_edge + diffusion_corner * corner_factor) / (4 + 4 * corner_factor))
-							#print(np.sum(P[pollutant][evType][1:-1, 1:-1, i])<=aux)
-							#print((dif_matrix==acc*dif_matrix).all())
-							#print('iter',i)
-							#print(np.sum(P[pollutant][evType][:,:,i]))
-							#print(delta/(4 + 4 * corner_factor))
-							#print((dif_matrix+acc*(delta/(4 + 4 * corner_factor))>1).any())
-							#aux=np.sum(P[pollutant][evType][1:-1, 1:-1, i])
-							P[pollutant][evType][1:-1, 1:-1, i+1] = (1-gamma) * acc * (wind[0][:,:,i]*P[pollutant][evType][1:-1, 2:, i] + wind[1][:,:,i]*P[pollutant][evType][1:-1, :-2, i] + wind[2][:,:,i]*P[pollutant][evType][:-2, 1:-1, i] + wind[3][:,:,i]*P[pollutant][evType][2:, 1:-1, i] + wind[4][:,:,i]*P[pollutant][evType][:-2, 2:, i] + wind[5][:,:,i]*P[pollutant][evType][2:, 2:, i] + wind[6][:,:,i]*P[pollutant][evType][:-2, :-2, i] + wind[7][:,:,i]*P[pollutant][evType][2:, :-2, i] + wind[8][:,:,i]*P[pollutant][evType][1:-1, 1:-1, i] + G[pollutant][evType][1:-1, 1:-1, i])
-							#print(2, np.sum(P[pollutant][evType][1:-1, 1:-1, i+1])<=np.sum(aux+G[pollutant][evType][1:-1, 1:-1, i]))
-					
-								
-				elapsed_time = time.time() - initial_time
-				percentage_done = (i + 1) / times * 100
-				# Estimación del tiempo total basado en el progreso actual
-				total_estimated_time = elapsed_time / (percentage_done / 100)
-				estimated_completion_time = initial_time + total_estimated_time
-				print(
-					f"Progress: {percentage_done:.2f}% End: {time.strftime('%H:%M:%S', time.localtime(estimated_completion_time))} Total: {int(round(total_estimated_time))} seconds  ",
-					end="\r"
-				)
-			except StopIteration:
-					print("\ncity_generator has no more items to generate.")
+							#P[key][1:-1, 1:-1] = acc * (dif_matrix * P[key][1:-1, 1:-1] + delta * (diffusion_edge + diffusion_corner * corner_factor) / (4 + 4 * corner_factor))# ORDEN DE LAS OPERACIONES NO ESTA CLARO??
+							aux[1:-1,1:-1] = acc * (dif_matrix * P[key][1:-1, 1:-1] + delta * (diffusion_edge + diffusion_corner * corner_factor) / (4 + 4 * corner_factor))# ORDEN DE LAS OPERACIONES NO ESTA CLARO??
+							if isave:
+								#savedP[key][:,:,isaved] = copy.deepcopy(P[key][1:-1, 1:-1])
+								savedP[key][:,:,isaved] = copy.deepcopy(aux[1:-1, 1:-1])
+								savedG[key][:,:,isaved] = copy.deepcopy(G[key])
+							if n>=0:
+								#averages[f"P_{key}"] = n/(n+1) * averages[f"P_{key}"] + 1/(n+1) * P[key][1:-1,1:-1]								
+								averages[f"P_{key}"] = n/(n+1) * averages[f"P_{key}"] + 1/(n+1) * aux[1:-1,1:-1]								
+								averages[f"G_{key}"] = n/(n+1) * averages[f"G_{key}"] + 1/(n+1) * G[key]								
+							#P[key][1:-1, 1:-1] = (1-gamma) * acc * (wind[0]*P[key][1:-1, 2:] + wind[1]*P[key][1:-1, :-2] + wind[2]*P[key][:-2, 1:-1] + wind[3]*P[key][2:, 1:-1] + wind[4]*P[key][:-2, 2:] + wind[5]*P[key][2:, 2:] + wind[6]*P[key][:-2, :-2] + wind[7]*P[key][2:, :-2] + wind[8]*P[key][1:-1, 1:-1] + G[key][:, :])
+							P[key][1:-1, 1:-1] = (1-gamma) * acc * (wind[0]*aux[1:-1, 2:] + wind[1]*aux[1:-1, :-2] + wind[2]*aux[:-2, 1:-1] + wind[3]*aux[2:, 1:-1] + wind[4]*aux[:-2, 2:] + wind[5]*aux[2:, 2:] + wind[6]*aux[:-2, :-2] + wind[7]*aux[2:, :-2] + wind[8]*aux[1:-1, 1:-1] + G[key][:, :])
+
+				except StopIteration:
+					#print("\ncity_generator has no more items to generate.")
 					break
-			if returnFits or contaminationExp:
-					carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
-					#print(carsAtDestination, '\n')
-		if (returnFits or contaminationExp) and False:
-			def func(x):
-				print(time.time())
-				E0 = x[0]
-				f1 = x[1]
-				f2 = x[2]
-				f3 = x[3]
-				f4 = x[4]
-				f5 = x[5]
-				f6 = x[6]
-				Paux = np.zeros_like(P)
-				Gaux = np.zeros_like(G)
-				for i in range(times):
-					for key in positions:
-						vel = tuple_norm(velocities[key][i])
-						accel = tuple_norm(accelerations[key][i])
-						a,b=positions[key][i]
-						Gaux[a,b,i] = max(E0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
-					for key in positionsEV:
-						a,b=positionsEV[key][i]
-						vel=0
-						accel=0
-						if i>0:
-							vel=tuple_norm(substract_tuples(positionsEV[key][i],positionsEV[key][i-1],5/1.8))
-						if i>1:
-							accel=tuple_norm(substract_tuples(substract_tuples(positionsEV[key][i],positionsEV[key][i-1],5/1.8),substract_tuples(positionsEV[key][i-1],positionsEV[key][i-2],5/1.8),1/1.8))
-						Gaux[a,b,i] += max(E0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
-					diffusion_edge = (
-						Paux[0:-2, 1:-1, i] + Paux[2:, 1:-1, i] +    # Up and down
-						Paux[1:-1, 0:-2, i] + Paux[1:-1, 2:, i]      # Left and right
-					)
-					diffusion_corner = (
-						Paux[0:-2, 0:-2, i] + Paux[2:, 2:, i] +      # Upper left and lower right diagonal
-						Paux[2:, 0:-2, i] + Paux[0:-2, 2:, i]        # Lower left and upper right diagonal
-					)
-					Paux[1:-1, 1:-1, i] = acc * (dif_matrix * Paux[1:-1, 1:-1, i] + delta / (4 + 4 * corner_factor) * (diffusion_edge + diffusion_corner * corner_factor))
-					Paux[1:-1, 1:-1, i+1] = (1-gamma) * acc * (wind[0][:,:,i]*Paux[2:, 1:-1, i] + wind[1][:,:,i]*Paux[:-2, 1:-1, i] + wind[2][:,:,i]*Paux[1:-1, :-2, i] + wind[3][:,:,i]*Paux[1:-1, 2:, i] + wind[4][:,:,i]*Paux[2:, :-2, i] + wind[5][:,:,i]*Paux[2:, 2:, i] + wind[6][:,:,i]*Paux[:-2, :-2, i] + wind[7][:,:,i]*Paux[:-2, 2:, i] + wind[8][:,:,i]*Paux[1:-1, 1:-1, i] + Gaux[1:-1, 1:-1, i])
-				return np.sqrt(np.sum((Paux[1:-1,1:-1,:]-P[1:-1,1:-1,:])**2))
-			x0 = np.array([0, 5.53e-1, 1.61e-1, -2.89e-3, 2.66e-1, 5.11e-1, 1.83e-1])
-			res = minimize(func, x0)
-
-			print(f"Resultado de la optimización: {res}")
-			print(f"Valor mínimo encontrado en: {res.x}")
-			print(f"Valor mínimo de la función: {res.fun}")
+			del P
+			del G
+			np.savez_compressed(os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
+			del savedP
+			np.savez_compressed(os.path.join("simulationData32", f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
+			del savedG
+			np.savez_compressed(os.path.join("simulationData32", f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+			del averages
+			np.savez_compressed(os.path.join("simulationData32", f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
+			del map_cars
+			gc.collect()
 
 
-		if returnFits or contaminationExp:
-			for pollutant in P:
-				if pollutant == 'PM_exhaust_prueba':
-					pass
-				else:
-					for evType in P[pollutant]:
-						#print(np.min(P[pollutant][evType][:,:,:])>=0)
-						Psum[:,:,:] += P[pollutant][evType][:,:,:]
-			Psum = np.maximum(Psum, 0)
-			max_color_value = np.max(Psum)#/10
-			print(max_color_value)
-			#positionMatrix = np.zeros_like(Psum)
-			positionMatrixEV = np.zeros_like(Psum)
-			positionMatrixPetrol = np.zeros_like(Psum)
-			positionMatrixDiesel = np.zeros_like(Psum)
-			for i in range(times):
-				for key in positionsEV:
-					a, b= positionsEV[key][i]
-					positionMatrixEV[a,b,i] += 1
-				for key in positions:
-					a, b = positions[key][i]
-					if key in diesel:
-						positionMatrixDiesel[a,b,i] += 1
-					else:
-						positionMatrixPetrol[a,b,i] += 1
-			positionMatrix = positionMatrixEV + positionMatrixPetrol + positionMatrixDiesel
-			def compare_matrices(A,B):
-				if np.shape(A)!=np.shape(B):
-					print('The two matrices have different sizes')
-					return
-				print('Suma primera matriz', np.sum(A))
-				print('Suma segunda matriz', np.sum(B))
-				A=A/np.sum(A)
-				B=B/np.sum(B)
-				meanA=(0,0)
-				meanB=(0,0)
-				m,n=np.shape(A)
-				C=A-B
-				dif=0
-				for i in range(m):
-					for j in range(n):
-						meanA=(meanA[0]+i*A[i,j],meanA[1]+j*A[i,j])
-						meanB=(meanB[0]+i*B[i,j],meanB[1]+j*B[i,j])
-						dif+=abs(C[i,j])
-				meanA = (meanA[1],meanA[0])
-				meanB = (meanB[1],meanB[0])
-				print('Posición promedio primera matriz: ', meanA)
-				print('Posición promedio segunda matriz: ', meanB)
-				print('Diferencia entre ambas matrices: ', dif)
-				return
-			print('Total Pollution emitted:')
-			for pollutant in G:
-				print(pollutant, ': ', sum([np.sum(G[pollutant][evType]) for evType in G[pollutant]]))
-			compare_matrices(positionMatrix[:,:,-2],Psum[:,:,-2])
-			compare_matrices(P['PM_exhaust']['Petrol'][:,:,-2],P['PM_exhaust_prueba']['Petrol'][:,:,-2])
-			compare_matrices(P['PM_exhaust']['Diesel'][:,:,-2],P['PM_exhaust_prueba']['Diesel'][:,:,-2])
-			plt.plot(range(Psum.shape[2]),[np.sum(Psum[:,:,t]) for t in range(Psum.shape[2])])
-			plt.xlabel('$t/1.8 s$')
-			plt.ylabel('$P_{tot} (g)$')
-			#filename = f"total_pollution_gamma_{gamma}.png"
-			filename = "total_pollution.png"
-			plt.savefig(filename)
-			plt.show()
-			plt.close()
-			if True:#Plot?
-				def update_plot(frame_number, zarray, plot, fig, ax):
-					for collection in ax.collections:
-						collection.remove()
-					#ax.collections.clear()
-					total_pollution = np.sum(zarray[:, :, frame_number])
-					plot.set_data(np.transpose(zarray[:, :, frame_number]))
-					ax.set_title(f"$t={frame_number}$, $P_{{tot}}={total_pollution:.6f}$")
-					x_vals = [a[frame_number][0]-1 for a in positions.values()]
-					y_vals = [a[frame_number][1]-1 for a in positions.values()]
-					x_vals_EV = [a[frame_number][0]-1 for a in positionsEV.values()]
-					y_vals_EV = [a[frame_number][1]-1 for a in positionsEV.values()]
-					ax.scatter(x_vals, y_vals, color='green', s=3)
-					ax.scatter(x_vals_EV, y_vals_EV, color='blue', s=1)
-
-				# Create figure and axes
-				fig, ax = plt.subplots()
-				#'''
-				#for i in range(len(acc)):
-				#    for j in range(len(acc[0])):
-				#        if acc[i, j] == 0:
-				#            ax.text(j, i, 'X', ha='center', va='center', color='red')
-				#'''
-				# Choose colorbar scale: 'linear' or 'logarithmic'
-				for cs in self.indiv.stations:
-					i,j = cs.coordinates
-					ax.text(i-1, j-1, 'X', ha='center', va='center', color='blue')
-					#ax.text(i, j, 'O', ha='center', va='center', color='blue')
-				colorbar_scale = 'logarithmic'  # 'logarithmic' or 'linear'
-
-				# Initial plot
-				if colorbar_scale == 'logarithmic':
-					norm = mcolors.LogNorm(vmin=0.01, vmax=max_color_value) # Avoid zero in log scale
-				else:
-					norm = mcolors.Normalize(vmin=0.01, vmax=max_color_value)
-
-				# Define the colors for the custom colormap
-				colors = ["green", "yellow", "red"]  # Define a list of colors
-				n_bins = 1000  # Increase this number to make the transitions smoother
-				cmap_name = "custom1"
-
-				# Create the colormap
-				cm = LinearSegmentedColormap.from_list(cmap_name, colors, N=n_bins)
-
-				plot = ax.imshow(Psum[1:-1, 1:-1, 0], cmap=cm, interpolation="nearest", norm=norm)
-				colorbar = fig.colorbar(plot, ax=ax, format='%.2f')
-
-				# Creating the animation
-				ani = animation.FuncAnimation(fig, update_plot, times, fargs=(Psum[1:-1,1:-1,:], plot, fig, ax), interval=200)
-
-				# Save the animation as a MP4
-				#FFwriter = animation.FFMpegWriter(fps=5)
-				#ani.save(f"pollution_genetic_gamma_{gamma}.mp4", writer = FFwriter)
-				#ani.save(f"pollution_genetic_gamma_{gamma}.gif", writer='imagemagick', fps=5)
-				ani.save("pollution.gif", writer='imagemagick', fps=5)
-				plt.show()
-				plt.close()
-		#filtered_dict = {key: original_dict[key] for key in keys_to_keep if key in original_dict}
-		cars = {
-			'EV': {'position': positionsEV, 'velocity': velocitiesEV, 'acceleration': accelerationsEV},
-			'Petrol': {'position': {key:positions[key] for key in  positions if key not in diesel}, 'velocity': {key:velocities[key] for key in  positions if key not in diesel}, 'acceleration': {key:accelerations[key] for key in  positions if key not in diesel}},
-			'Diesel': {'position': {key:positions[key] for key in diesel}, 'velocity': {key:velocities[key] for key in diesel}, 'acceleration': {key:accelerations[key] for key in diesel}}
-			}
-		filename = f"P_delta_{delta}_gamma_{gamma}.pkl"
-		with open(filename, 'wb') as file:
-			pickle.dump(P, file)
-		filename = f"G_delta_{delta}_gamma_{gamma}.pkl"
-		with open(filename, 'wb') as file:
-			pickle.dump(G, file)
-		filename = f"cars_delta_{delta}_gamma_{gamma}.pkl"
-		with open(filename, 'wb') as file:
-			pickle.dump(cars, file)
-		new_acc = np.ones((width+2, height+2))
-		new_acc[1:-1,1:-1] = acc
-		if returnFits:
-			return -carsAtDestination/times+Psum[new_acc==1,:].mean()+Psum[new_acc==1,:].std(), loc_fits
 		else:
-			return
+			initial_time = time.time()
+			next(self.city_generator)
+			if returnFits or contaminationExp:
+				timestepvalue=np.float32(1.8)
+				cellsize=5
+				num_cs = len(self.grid.cs)
+				loc_fits = [0] * num_cs
+				carsAtDestination = 0
+				width = len(acc)
+				height = len(acc[0])
+				#keys = [car.id for car in self.cars if car.p.type == CarType.ICEV]
+				positions = {cartype : {car.id: [(car.cell.x,car.cell.y)]*(times+1) for car in self.cars if car.p.type == cartype and car.cell is not None} for cartype in CAR_PROPERTIES}
+				#positions = {car.id: [(car.cell.x,car.cell.y)]*times for car in self.cars if car.p.type == CarType.ICEV and car.cell is not None}
+				positions[CarType.EV].update({car.id: [(car.target2.x,car.target2.y)]*(times+1) for car in self.cars if car.p.type == CarType.EV and car.cell is None}) #CORREGIR A LOS QUE PUEDAN CARGAR
+				#print('Number of wrong ICEV cars', len([car for car in self.cars if car.p.type != CarType.EV and car.cell is None]))
+				#diesel = list(positions.keys())[:len(positions)//3]
+				#print('Number of cars: ', len(self.cars))
+				#print('Should be: ', len(self.cars))
+				#print('Number of EV: ', CAR_PROPERTIES[CarType.EV].number)
+				#print('Number of Petrol: ', CAR_PROPERTIES[CarType.Petrol].number)
+				#print('Number of diesel: ', CAR_PROPERTIES[CarType.Diesel].number)
+				velocities = {cartype : {car.id: [(0,0)]*(times+1) for car in self.cars if car.p.type == cartype} for cartype in CAR_PROPERTIES}
+				accelerations = {cartype : {car.id: [0]*(times+1) for car in self.cars if car.p.type == cartype} for cartype in CAR_PROPERTIES}
+				#velocities = {car.id: [(0,0)]*times for car in self.cars if car.p.type == CarType.ICEV}
+				#accelerations = {car.id: [0]*times for car in self.cars if car.p.type == CarType.ICEV}
+				def substract_tuples(a,b,factor):
+					aux = ((a[0]-b[0])*factor,(a[1]-b[1])*factor)
+					if a[0]-b[0]>0.5*width:
+						aux = (aux[0]-width*factor,aux[1])
+					if a[0]-b[0]<-0.5*width:
+						aux = (aux[0]+width*factor,aux[1])
+					if a[1]-b[1]>0.5*height:
+						aux = (aux[0],aux[1]-height*factor)
+					if a[1]-b[1]<-0.5*height:
+						aux = (aux[0],aux[1]+height*factor)
+					return aux
+				def tuple_norm(a):
+						return np.sqrt(a[0]**2+a[1]**2)
+
+				G = {cartype : {pollutant : np.zeros((width, height, times+1), dtype=np.float32) for pollutant in poll_coefs[cartype] if pollutant != 'NOxdecel' and pollutant != 'VOCdecel'} for cartype in CAR_PROPERTIES}
+				P = {cartype : {pollutant : np.zeros((width+2, height+2, times+1), dtype=np.float32) for pollutant in poll_coefs[cartype] if pollutant != 'NOxdecel' and pollutant != 'VOCdecel'} for cartype in CAR_PROPERTIES}
+
+				'''
+				G = {pollutant: {CarType.Petrol: np.zeros((width+2, height+2, times+1)),
+								CarType.Diesel: np.zeros((width+2, height+2, times+1)),
+								CarType.EV: np.zeros((width+2, height+2, times+1))}
+					for pollutant in ['CO2', 'NOx', 'VOC', 'PMexhaust', 'PMexhaustprueba', 'PMnonexhaust25', 'PMnonexhaust10']}#'PMexhaustprueba', 
+
+				P = {pollutant: {CarType.Petrol: np.zeros((width+2, height+2, times+1)),
+								CarType.Diesel: np.zeros((width+2, height+2, times+1)),
+								CarType.EV: np.zeros((width+2, height+2, times+1))}
+					for pollutant in ['CO2', 'NOx', 'VOC', 'PMexhaust', 'PMexhaustprueba', 'PMnonexhaust25', 'PMnonexhaust10']}
+				Psum = np.zeros((width+2, height+2, times+1))
+				#print(wind)
+				'''
+				
+			for i in range(times):
+				try:
+					if i==0:
+						for k in range(width):
+							for j in range(height):
+								self.grid.grid[k,j].pollutionLevel = 0
+					#for pollutant in P:
+					#	for evType in P[pollutant]:
+					#		Psum[:,:,i] += P[cartype][pollutant][:,:,i]
+					if names[-1]:
+						for k in range(width):
+							for j in range(height):
+								self.grid.grid[k,j].pollutionLevel = 0.5*(sum([P[cartype]['CO2'][k+1,j+1,i] for cartype in CAR_PROPERTIES if cartype != CarType.EV]) + self.grid.grid[k,j].pollutionLevel)
+					if i>0:
+						next(self.city_generator)
+					for k in range(num_cs):
+						current_cs = self.grid.cs[k]
+						loc_fits[k] += -(len([1 for car in current_cs.car if car!=None])-len(current_cs.queue))/current_cs.numPlugins
+						#self.cars[523]
+					if returnFits or contaminationExp:
+						#aux.append(len([car for car in self.cars if car.p.type == CarType.ICEV and car.cell is None]))
+						for cartype in positions:
+							for key in positions[cartype]:# for c in cars, positions[c]=...
+								if self.cars[key].cell is None:
+									positions[cartype][key][i] = (self.cars[key].target2.x,self.cars[key].target2.y)
+								else:
+									positions[cartype][key][i] = (self.cars[key].cell.x,self.cars[key].cell.y)#[(car.cell.x,car.cell.y) for car in self.cars if car.id == key][0]
+								if i>0:
+									velocities[cartype][key][i] = (substract_tuples(positions[cartype][key][i],positions[cartype][key][i-1],cellsize/timestepvalue)) # Factor due to Amaro
+								vel = tuple_norm(velocities[cartype][key][i])
+								if i>1:
+									accelerations[cartype][key][i] = (vel-tuple_norm(velocities[cartype][key][i-1]))/timestepvalue
+								accel = accelerations[cartype][key][i]
+								a,b=positions[cartype][key][i]
+								if self.cars[key].cell is not None:
+									for pollutant in G[cartype]:
+										pollutant2 = pollutant
+										if accel < -0.5:
+											if pollutant == 'NOx':
+												pollutant2 = 'NOxdecel'
+											if pollutant == 'VOC':
+												pollutant2 = 'VOCdecel'
+										G[cartype][pollutant][a,b,i]=max(poll_coefs[cartype][pollutant2][0], poll_coefs[cartype][pollutant2][1] + poll_coefs[cartype][pollutant2][2]*vel + poll_coefs[cartype][pollutant2][3]*vel**2 + poll_coefs[cartype][pollutant2][4]*accel + poll_coefs[cartype][pollutant2][5]*accel**2 + poll_coefs[cartype][pollutant2][6]*vel*accel)*timestepvalue
+
+
+						for cartype in P:
+							for pollutant in P[cartype]:
+								diffusion_edge = (
+									P[cartype][pollutant][0:-2, 1:-1, i] + P[cartype][pollutant][2:, 1:-1, i] +    # Left and Right
+									P[cartype][pollutant][1:-1, 0:-2, i] + P[cartype][pollutant][1:-1, 2:, i]      # Up and Down
+								)
+								diffusion_corner = (
+									P[cartype][pollutant][0:-2, 0:-2, i] + P[cartype][pollutant][2:, 2:, i] +      # Diagonals
+									P[cartype][pollutant][2:, 0:-2, i] + P[cartype][pollutant][0:-2, 2:, i]        # Diagonals
+								)
+								#aux=np.sum(P[cartype][pollutant][1:-1, 1:-1, i])
+								#print(aux*(1-delta)+delta*np.sum(diffusion_corner+diffusion_edge)/8-np.sum(P[cartype][pollutant][1:-1, 1:-1, i]))
+								P[cartype][pollutant][1:-1, 1:-1, i] = acc * (dif_matrix * P[cartype][pollutant][1:-1, 1:-1, i] + delta * (diffusion_edge + diffusion_corner * corner_factor) / (4 + 4 * corner_factor))# ORDEN DE LAS OPERACIONES NO ESTA CLARO??
+								#print(np.sum(P[cartype][pollutant][1:-1, 1:-1, i])<=aux)
+								#print((dif_matrix==acc*dif_matrix).all())
+								#print('iter',i)
+								#print(np.sum(P[cartype][pollutant][:,:,i]))
+								#print(delta/(4 + 4 * corner_factor))
+								#print((dif_matrix+acc*(delta/(4 + 4 * corner_factor))>1).any())
+								#aux=np.sum(P[cartype][pollutant][1:-1, 1:-1, i])
+								if i < times:
+									P[cartype][pollutant][1:-1, 1:-1, i+1] = (1-gamma) * acc * (wind[0][:,:,i]*P[cartype][pollutant][1:-1, 2:, i] + wind[1][:,:,i]*P[cartype][pollutant][1:-1, :-2, i] + wind[2][:,:,i]*P[cartype][pollutant][:-2, 1:-1, i] + wind[3][:,:,i]*P[cartype][pollutant][2:, 1:-1, i] + wind[4][:,:,i]*P[cartype][pollutant][:-2, 2:, i] + wind[5][:,:,i]*P[cartype][pollutant][2:, 2:, i] + wind[6][:,:,i]*P[cartype][pollutant][:-2, :-2, i] + wind[7][:,:,i]*P[cartype][pollutant][2:, :-2, i] + wind[8][:,:,i]*P[cartype][pollutant][1:-1, 1:-1, i] + G[cartype][pollutant][:, :, i])
+									#print(2, np.sum(P[cartype][pollutant][1:-1, 1:-1, i+1])<=np.sum(aux+G[cartype][pollutant][1:-1, 1:-1, i]))
+						
+									
+					elapsed_time = time.time() - initial_time
+					percentage_done = (i + 1) / times * 100
+					# Estimación del tiempo total basado en el progreso actual
+					total_estimated_time = elapsed_time / (percentage_done / 100)
+					estimated_completion_time = initial_time + total_estimated_time
+					#print(
+					#	f"Progress: {percentage_done:.2f}% End: {time.strftime('%H:%M:%S', time.localtime(estimated_completion_time))} Total: {int(round(total_estimated_time))} seconds  ",
+					#	end="\r"
+					#)
+				except StopIteration:
+						#print("\ncity_generator has no more items to generate.")
+						break
+				if returnFits or contaminationExp:
+						carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
+						#print(carsAtDestination, '\n')
+			#plt.plot(range(len(aux)),aux)
+			#plt.show()
+			if (returnFits or contaminationExp) and False:
+				def func(x):
+					print(time.time())
+					E0 = x[0]
+					f1 = x[1]
+					f2 = x[2]
+					f3 = x[3]
+					f4 = x[4]
+					f5 = x[5]
+					f6 = x[6]
+					Paux = np.zeros_like(P)
+					Gaux = np.zeros_like(G)
+					for i in range(times):
+						for key in positions:
+							vel = tuple_norm(velocities[key][i])
+							accel = tuple_norm(accelerations[key][i])
+							a,b=positions[key][i]
+							Gaux[a,b,i] = max(E0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
+						for key in positionsEV:
+							a,b=positionsEV[key][i]
+							vel=0
+							accel=0
+							if i>0:
+								vel=tuple_norm(substract_tuples(positionsEV[key][i],positionsEV[key][i-1],5/1.8))
+							if i>1:
+								accel=tuple_norm(substract_tuples(substract_tuples(positionsEV[key][i],positionsEV[key][i-1],5/1.8),substract_tuples(positionsEV[key][i-1],positionsEV[key][i-2],5/1.8),1/1.8))
+							Gaux[a,b,i] += max(E0, f1 + f2*vel + f3*vel**2 + f4*accel + f5*accel**2 + f6*vel*accel)
+						diffusion_edge = (
+							Paux[0:-2, 1:-1, i] + Paux[2:, 1:-1, i] +    # Up and down
+							Paux[1:-1, 0:-2, i] + Paux[1:-1, 2:, i]      # Left and right
+						)
+						diffusion_corner = (
+							Paux[0:-2, 0:-2, i] + Paux[2:, 2:, i] +      # Upper left and lower right diagonal
+							Paux[2:, 0:-2, i] + Paux[0:-2, 2:, i]        # Lower left and upper right diagonal
+						)
+						Paux[1:-1, 1:-1, i] = acc * (dif_matrix * Paux[1:-1, 1:-1, i] + delta / (4 + 4 * corner_factor) * (diffusion_edge + diffusion_corner * corner_factor))
+						Paux[1:-1, 1:-1, i+1] = (1-gamma) * acc * (wind[0][:,:,i]*Paux[2:, 1:-1, i] + wind[1][:,:,i]*Paux[:-2, 1:-1, i] + wind[2][:,:,i]*Paux[1:-1, :-2, i] + wind[3][:,:,i]*Paux[1:-1, 2:, i] + wind[4][:,:,i]*Paux[2:, :-2, i] + wind[5][:,:,i]*Paux[2:, 2:, i] + wind[6][:,:,i]*Paux[:-2, :-2, i] + wind[7][:,:,i]*Paux[:-2, 2:, i] + wind[8][:,:,i]*Paux[1:-1, 1:-1, i] + Gaux[1:-1, 1:-1, i])
+					return np.sqrt(np.sum((Paux[1:-1,1:-1,:]-P[1:-1,1:-1,:])**2))
+				x0 = np.array([0, 5.53e-1, 1.61e-1, -2.89e-3, 2.66e-1, 5.11e-1, 1.83e-1])
+				res = minimize(func, x0)
+
+				print(f"Resultado de la optimización: {res}")
+				print(f"Valor mínimo encontrado en: {res.x}")
+				print(f"Valor mínimo de la función: {res.fun}")
+
+				'''
+
+			if returnFits or contaminationExp:
+				for cartype in P:
+					for pollutant in P[cartype]:
+						#if pollutant == 'PMexhaustprueba':
+					#		pass
+				#		else:
+							plt.plot([a*1.8/60 for a in range(times+1)],[np.sum(P[cartype][pollutant][:,:,t]) for t in range(times+1)])
+							plt.xlabel('$t (min)$')
+							plt.ylabel('$P (g)$')
+							#filename = f"total_pollution_gamma_{gamma}.png"
+							filename = f"total_pollution_cartype_{str(cartype)}_pollutant_{pollutant}.png"
+							plt.savefig(filename)
+							#plt.show()
+							plt.close()
+							#print(np.min(P[cartype][pollutant][:,:,:])>=0)
+				#Psum = np.maximum(Psum, 0)
+				#max_color_value = np.max(Psum)#/10
+				#print(max_color_value)
+				#positionMatrix = np.zeros_like(Psum)
+				positionMatrixEV = np.zeros_like(Psum)
+				positionMatrixPetrol = np.zeros_like(Psum)
+				positionMatrixDiesel = np.zeros_like(Psum)
+				for i in range(times):
+					for key in positionsEV:
+						a, b= positionsEV[key][i]
+						positionMatrixEV[a,b,i] += 1
+					for key in positions:
+						a, b = positions[key][i]
+						if key in diesel:
+							positionMatrixDiesel[a,b,i] += 1
+						else:
+							positionMatrixPetrol[a,b,i] += 1
+				positionMatrix = positionMatrixEV + positionMatrixPetrol + positionMatrixDiesel
+				def compare_matrices(A,B):
+					if np.shape(A)!=np.shape(B):
+						print('The two matrices have different sizes')
+						return
+					print('Suma primera matriz', np.sum(A))
+					print('Suma segunda matriz', np.sum(B))
+					A=A/np.sum(A)
+					B=B/np.sum(B)
+					meanA=(0,0)
+					meanB=(0,0)
+					m,n=np.shape(A)
+					C=A-B
+					dif=0
+					for i in range(m):
+						for j in range(n):
+							meanA=(meanA[0]+i*A[i,j],meanA[1]+j*A[i,j])
+							meanB=(meanB[0]+i*B[i,j],meanB[1]+j*B[i,j])
+							dif+=abs(C[i,j])
+					meanA = (meanA[1],meanA[0])
+					meanB = (meanB[1],meanB[0])
+					print('Posición promedio primera matriz: ', meanA)
+					print('Posición promedio segunda matriz: ', meanB)
+					print('Diferencia entre ambas matrices: ', dif)
+					return
+				print('Total Pollution emitted:')
+				for pollutant in G:
+					print(pollutant, ': ', sum([np.sum(G[cartype][pollutant]) for evType in G[pollutant]]))
+				compare_matrices(positionMatrix[:,:,-2],Psum[:,:,-2])
+				compare_matrices(P['PMexhaust'][CarType.Petrol][:,:,-2],P['PMexhaustprueba'][CarType.Petrol][:,:,-2])
+				compare_matrices(P['PMexhaust'][CarType.Diesel][:,:,-2],P['PMexhaustprueba'][CarType.Diesel][:,:,-2])
+				'''
+				'''
+				if True:#Plot?
+					def update_plot(frame_number, zarray, plot, fig, ax):
+						for collection in ax.collections:
+							collection.remove()
+						#ax.collections.clear()
+						total_pollution = np.sum(zarray[:, :, frame_number])
+						plot.set_data(np.transpose(zarray[:, :, frame_number]))
+						ax.set_title(f"$t={frame_number}$, $P_{{tot}}={total_pollution:.6f}$")
+						x_vals = [a[frame_number][0]-1 for a in positions.values()]
+						y_vals = [a[frame_number][1]-1 for a in positions.values()]
+						#x_vals_EV = [a[frame_number][0]-1 for a in positionsEV.values()]
+						#y_vals_EV = [a[frame_number][1]-1 for a in positionsEV.values()]
+						ax.scatter(x_vals, y_vals, color='green', s=3)
+						#ax.scatter(x_vals_EV, y_vals_EV, color='blue', s=1)
+
+					# Create figure and axes
+					fig, ax = plt.subplots()
+					
+					#for i in range(len(acc)):
+					#    for j in range(len(acc[0])):
+					#        if acc[i, j] == 0:
+					#            ax.text(j, i, 'X', ha='center', va='center', color='red')
+					
+					# Choose colorbar scale: 'linear' or 'logarithmic'
+					for cs in self.indiv.stations:
+						i,j = cs.coordinates
+						ax.text(i-1, j-1, 'X', ha='center', va='center', color='blue')
+						#ax.text(i, j, 'O', ha='center', va='center', color='blue')
+					colorbar_scale = 'logarithmic'  # 'logarithmic' or 'linear'
+
+					# Initial plot
+					if colorbar_scale == 'logarithmic':
+						norm = mcolors.LogNorm(vmin=0.01, vmax=max_color_value) # Avoid zero in log scale
+					else:
+						norm = mcolors.Normalize(vmin=0.01, vmax=max_color_value)
+
+					# Define the colors for the custom colormap
+					colors = ["green", "yellow", "red"]  # Define a list of colors
+					n_bins = 1000  # Increase this number to make the transitions smoother
+					cmap_name = "custom1"
+
+					# Create the colormap
+					cm = LinearSegmentedColormap.from_list(cmap_name, colors, N=n_bins)
+
+					plot = ax.imshow(Psum[1:-1, 1:-1, 0], cmap=cm, interpolation="nearest", norm=norm)
+					colorbar = fig.colorbar(plot, ax=ax, format='%.2f')
+
+					# Creating the animation
+					ani = animation.FuncAnimation(fig, update_plot, times, fargs=(Psum[1:-1,1:-1,:], plot, fig, ax), interval=200)
+
+					# Save the animation as a MP4
+					#FFwriter = animation.FFMpegWriter(fps=5)
+					#ani.save(f"pollution_genetic_gamma_{gamma}.mp4", writer = FFwriter)
+					#ani.save(f"pollution_genetic_gamma_{gamma}.gif", writer='imagemagick', fps=5)
+					ani.save("pollution.gif", writer='imagemagick', fps=5)
+					#plt.show()
+					plt.close()
+					'''
+			'''
+			#filtered_dict = {key: original_dict[key] for key in keys_to_keep if key in original_dict}
+			cars = {
+				CarType.EV: {'position': positionsEV, 'velocity': velocitiesEV, 'acceleration': accelerationsEV},
+				CarType.Petrol: {'position': {key:positions[key] for key in  positions if key not in diesel}, 'velocity': {key:velocities[key] for key in  positions if key not in diesel}, 'acceleration': {key:accelerations[key] for key in  positions if key not in diesel}},
+				CarType.Diesel: {'position': {key:positions[key] for key in diesel}, 'velocity': {key:velocities[key] for key in diesel}, 'acceleration': {key:accelerations[key] for key in diesel}}
+				}
+			
+			
+			filename = f"P_delta_{delta}_gamma_{gamma}.pkl"
+			with open(filename, 'wb') as file:
+				pickle.dump(P, file)
+			filename = f"G_delta_{delta}_gamma_{gamma}.pkl"
+			with open(filename, 'wb') as file:
+				pickle.dump(G, file)
+			filename = f"cars_delta_{delta}_gamma_{gamma}.pkl"
+			with open(filename, 'wb') as file:
+				pickle.dump(cars, file)
+
+			with h5py.File('P_delta_{delta}_gamma_{gamma}.h5', 'w') as f:
+				for pollutant, vehicles in P.items():
+					for vehicle, data in vehicles.items():
+						f.create_dataset(f"{pollutant}/{vehicle}", data=data, compression='gzip')
+			with h5py.File('G_delta_{delta}_gamma_{gamma}.h5', 'w') as f:
+				for pollutant, vehicles in G.items():
+					for vehicle, data in vehicles.items():
+						f.create_dataset(f"{pollutant}/{vehicle}", data=data, compression='gzip')
+			with h5py.File('cars_delta_{delta}_gamma_{gamma}.h5', 'w') as f:
+				for vehicle, properties in cars.items():
+					for property, data in properties.items():
+						f.create_dataset(f"{vehicle}/{property}", data=data, compression='gzip')
+			
+
+			for cartype in P:
+				for pollutant in P[cartype]:
+					P[cartype][pollutant] = P[cartype][pollutant].astype(np.float32)
+			'''
+			#P = {str(key): value for key, value in P.items()}
+
+			saved_times = list(range(0, times+1, max(times//40,2)))
+
+			flattened_P = {}
+			averages = {}
+			for key1, subdict in P.items():
+				for key2, array in subdict.items():
+					flattened_P[f"{key1}_{key2}"] = array[1:-1,1:-1,saved_times].astype(np.float32)
+					averages[f"P_{key1}_{key2}"] = np.mean(array[1:-1, 1:-1, times//4:], axis=2).astype(np.float32)
+
+			flattened_G = {}
+			for key1, subdict in G.items():
+				for key2, array in subdict.items():
+					flattened_G[f"{key1}_{key2}"] = array[:,:,saved_times].astype(np.float32)
+					averages[f"G_{key1}_{key2}"] = np.mean(array[:, :, times//4:], axis=2).astype(np.float32)
+
+			np.savez_compressed(os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_P)
+			np.savez_compressed(os.path.join("simulationData32", f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_G)
+			#p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting
+			#np.savez_compressed(f'G_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **flattened_G)
+			
+			del P
+			del G
+			del flattened_P
+			del flattened_G
+			gc.collect()
+
+
+			map_cars =  {cartype : {'positions': np.zeros((width, height, times+1)), 'velocities': np.zeros((width, height, times+1)), 'accelerations': np.zeros((width, height, times+1)), 'braking': np.zeros((width, height, times+1))} for cartype in CAR_PROPERTIES}
+			for cartype in map_cars:
+				for car in positions[cartype]:
+					for t in range(times+1):
+						a,b=positions[cartype][car][t]
+						map_cars[cartype]['positions'][a,b,t]+=1
+						map_cars[cartype]['velocities'][a,b,t]+=tuple_norm(velocities[cartype][car][t])
+						aux = accelerations[cartype][car][t]
+						if aux > 0:
+							map_cars[cartype]['accelerations'][a,b,t]+=aux
+						else:
+							map_cars[cartype]['braking'][a,b,t]-=aux
+			flattened_map_cars={}
+			for key1, subdict in map_cars.items():
+				for key2, array in subdict.items():
+					flattened_map_cars[f"{key1}_{key2}"] = array[:,:,saved_times].astype(np.float32)
+					averages[f"cars_{key1}_{key2}"] = np.mean(array[:,:,times//4:], axis=2).astype(np.float32)		
+
+			np.savez_compressed(os.path.join("simulationData32", f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_map_cars)
+			#np.savez_compressed(f'cars_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **flattened_map_cars)#p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting
+			np.savez_compressed(os.path.join("simulationData32", f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+			#np.savez_compressed(f'averages_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **averages)
+			del flattened_map_cars
+			del averages
+			gc.collect()
+			#print('Experimento terminado')
+
+			'''
+			for key1, subdict1 in cars.items():
+				for key2, subdict2 in subdict1.items():
+					for key3, array in subdict2.items():
+						averages[f"averagecars{key1}_{key2}_{key3}"] = np.mean(array[:, :, 90:], axis=2).astype(np.float32)
+			'''
+			#averages = {'average_P': np.mean(P[:, :, 90:], axis=2), 'average_G': np.mean(G[:, :, 90:], axis=2), 'average_positions': np.mean(P[:, :, 90:], axis=2), 'average_velocities': np.mean(P[:, :, 90:], axis=2), 'average_accelerations': np.mean(P[:, :, 90:], axis=2)}
+			#np.savez_compressed(f'averages_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **averages)
+			'''
+			def compute_norms(velocity_dict):
+				norms = []
+				for velocities in velocity_dict.values():
+					norms.extend([math.sqrt(x**2 + y**2)*3.6 for x, y in velocities])
+				return norms
+			
+			all_norms = compute_norms(velocities) + compute_norms(velocitiesEV)
+			#print('maximum', np.max(all_norms))
+
+			frequency = Counter(all_norms)
+
+			# Prepare data for plotting
+			values = list(frequency.keys())
+			counts = list(frequency.values())
+
+			# Create the plot
+			plt.bar(values, counts, width=0.01, align='center', color='b', alpha=0.7)  # Small width to mimic lines
+			plt.xlabel('Value')
+			plt.ylabel('Frequency')
+			plt.title('Histogram of Discrete Values')
+			plt.xticks(values)  # Ensure all unique values are marked on x-axis
+			plt.grid(axis='y', linestyle='--', alpha=0.6)  # Optional grid for better visibility
+			plt.show()
+			'''
+
+			#new_acc = np.ones((width+2, height+2))
+			#new_acc[1:-1,1:-1] = acc
+			if returnFits:
+				return #-carsAtDestination/times+Psum[new_acc==1,:].mean()+Psum[new_acc==1,:].std(), loc_fits
+			else:
+				return
 	
-		print() 
-		self.stats.close()
+		#print() 
+		#self.stats.close()
 		
 	
 	def update(self,frameNum, img, grid, heigh, width):
@@ -1125,6 +1473,7 @@ class City:
 	def introduceCarsInCSToStacionaryState(self):
 		if not self.p.introduceCarsInCSToStacionaryState:
 			return
+		
 		# count cars in cs
 		carInCS=0
 		for car in self.cars:
@@ -1132,13 +1481,37 @@ class City:
 				carInCS+=1
 		# calculate equilibrium of cars in cs in energy terms
 		percentageCarsInCS=1/(self.p.carRechargePerTic/self.p.mediumVelocity+1)
-		equilibrium=self.p.numberCars*percentageCarsInCS
+		#numberCarsCanCharge = sum([CAR_PROPERTIES[cartype].number for cartype in CAR_PROPERTIES if CAR_PROPERTIES[cartype].needsCharging])
+		carsCanCharge = [car for car in self.cars if CAR_PROPERTIES[car.p.type].needsCharging]
+		numberCarsCanCharge = len(carsCanCharge)
+		equilibrium=numberCarsCanCharge*percentageCarsInCS
+
+
+		queryCS = random.sample(carsCanCharge, int(self.p.aStarCSQueueQuery*numberCarsCanCharge))
+		reserve = random.sample(queryCS, int(self.p.aStarCSReserve*len(queryCS)))
+		for car in queryCS:
+			car.csqueuequery=True
+		for car in reserve:
+			car.csreserve=True
+
+
 		# move cars to equilibrium number
-		while carInCS<equilibrium:
+		#while carInCS<equilibrium:
 			# get random car
-			car=self.cars[random.randint(0,len(self.cars)-1)]
-			# if car is not in cs
-			if not car.isCharging():
+		if carInCS>equilibrium:
+			print('Error, should not be as many cars in CS')
+		if carInCS<equilibrium:
+			n=int(equilibrium-carInCS)
+			if n<0:
+				print('There are more cars in CS than there should be initially, so equilibrium - carInCS = {n}.')
+				n=0
+			selectableCars = [car for car in self.cars if CAR_PROPERTIES[car.p.type].needsCharging and not car.isCharging()]
+			if len(selectableCars)<n:
+				print(f"Not enough cars meet the criteria, only {len(selectableCars)} cars available, but {n} more are needed as {carInCS} are already charging. ", 'Density of EV: ', self.p.densityEV)
+				cars=selectableCars
+			else:
+				cars=random.sample(selectableCars,n)
+			for car in cars:
 				# move car to cs
 				cell=car.cell
 				_,_,cs=car.localizeCS(cell,self.t)	
@@ -1147,10 +1520,33 @@ class City:
 				car.cell=cs.cell
 				car.enterOnCS()
 				carInCS+=1
-
+			'''
+			car=random.choice(self.cars)#self.cars[random.randint(0,numberEVCars-1)]
+			# if car is not in cs
+			if car.p.type == CarType.EV and not car.isCharging():
+				# move car to cs
+				cell=car.cell
+				_,_,cs=car.localizeCS(cell,self.t)	
+				car.target2=cs.cell
+				cell.car=None
+				car.cell=cs.cell
+				car.enterOnCS()
+				carInCS+=1
+			'''
 		#if self.p.viewWarning: Hacked 
 			#if self.p.numberStations<equilibrium:
 			#print("Number of chargers:",self.p.numberChargingPerStation)
+
+	def nextCarType(self):
+		total=sum(CAR_PROPERTIES[c].number for c in CAR_PROPERTIES)
+		if total==0:
+			density = [(c,CAR_PROPERTIES[c].density) for c in CAR_PROPERTIES]
+		else:
+			density = [(c,CAR_PROPERTIES[c].density-CAR_PROPERTIES[c].number/total) for c in CAR_PROPERTIES]
+		r = max(density, key=lambda x: x[1])[0]
+		CAR_PROPERTIES[r].number+=1
+		return r
+
 
 	def generator(self):
 		#try:
@@ -1182,12 +1578,12 @@ class City:
 		p.mediumVelocity=self.grid.totalVelocity/self.grid.streets
 		p.numberChargers=p.numberChargersPerBlock*p.numberBlocks
 
-		#p.numberChargers=p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic*p.energy
-		if p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic==0:
+		#p.numberChargers=p.numberCars*p.densityEV*p.mediumVelocity/p.carRechargePerTic*p.energy
+		if p.numberCars*p.densityEV*p.mediumVelocity/p.carRechargePerTic==0:
 			p.energy = np.inf
 		else:
-			p.energy=p.numberChargers/(p.numberCars*p.percentageEV*p.mediumVelocity/p.carRechargePerTic)
-		print("energy",p.energy)
+			p.energy=p.numberChargers/(p.numberCars*p.densityEV*p.mediumVelocity/p.carRechargePerTic)
+		#print("energy",p.energy)
 		
 		#p.numberChargersPerBlock=p.numberChargers/p.numberBlocks
 		p.numberChargingPerStation=p.numberChargers//p.numberStations
@@ -1232,12 +1628,53 @@ class City:
 
 		# Put cars
 		self.cars=[]
+		CAR_PROPERTIES[CarType.EV].density = self.p.densityEV
+		#print(self.p.densityEV)
+		#print(CAR_PROPERTIES[CarType.EV].density)
+		CAR_PROPERTIES[CarType.Diesel].density = self.p.densityDiesel
+		self.p.densityPetrol = 1 - self.p.densityDiesel - self.p.densityEV
+		CAR_PROPERTIES[CarType.Petrol].density = self.p.densityPetrol
+		#print('densidades: ', {cartype: CAR_PROPERTIES[cartype].density for cartype in CAR_PROPERTIES})
+		if any(CAR_PROPERTIES[cartype].density < 0 for cartype in CAR_PROPERTIES):
+			print('Error: densities should sum 1.')
+			return
+		def assignCarTypes(num_cars):
+			# Calculate the exact number of cars for each type based on density
+			car_counts = {c: int(CAR_PROPERTIES[c].density * num_cars) for c in CAR_PROPERTIES}
+			
+			# Adjust counts to ensure the total is correct due to rounding
+			total_assigned = sum(car_counts.values())
+			difference = num_cars - total_assigned
+			if difference > 0:
+				# Sort car types by density in descending order
+				sorted_types = sorted(CAR_PROPERTIES.keys(), key=lambda c: CAR_PROPERTIES[c].density, reverse=True)
+				
+				# Distribute the remaining cars to the types with the highest densities first
+				for i in range(difference):
+					car_counts[sorted_types[i % len(sorted_types)]] += 1
+
+			# Create the list of car types
+			car_types = []
+			for c, count in car_counts.items():
+				car_types.extend([c] * count)
+
+			# Shuffle to randomize the order of car types
+			random.shuffle(car_types)
+			
+			return car_types
+		allcartypes = assignCarTypes(numberCars)
 		for id in range(numberCars): # number of cars
 			p2=self.p.clone()
-			if (id+1)/numberCars<self.p.percentageEV:
+			#p2.type = self.nextCarType()
+			p2.type = allcartypes[id]
+			CAR_PROPERTIES[p2.type].number += 1
+
+			'''
+			if (id+1)/numberCars<self.p.densityEV:
 				p2.type=CarType.EV
 			else:
 				p2.type=CarType.ICEV
+			'''
 
 			self.cars.append(Car(p2,id,self.grid,self.grid.randomStreet(),self.grid.randomStreet(),self.t))
 			if self.p.viewDrawCity:
@@ -1246,13 +1683,16 @@ class City:
 					yield
 				yieldI+=1
 
-		
+		#print('Density of EV: ', CAR_PROPERTIES[CarType.EV].number/numberCars)
+		#print('Density of Diesel: ', CAR_PROPERTIES[CarType.Diesel].number/numberCars)
+		#print('Density of Petrol', CAR_PROPERTIES[CarType.Petrol].number/numberCars)
 		
 		
 		self.introduceCarsInCSToStacionaryState()
 
 		# Simulation
 		while True:
+			#sleep(1)
 			self.t+=1
 			self.stats.setT(self.t) # INTERCEPTAR
 			firstTime=True
@@ -1303,7 +1743,8 @@ class Grid:
 	Also coinains several utility functions to calculate the distance between two cells, to get a random street, and 
 	to link two cells.
 	"""
-	def __init__(self, heigh, width):
+	def __init__(self, p, heigh, width): #HACKED: añadido grid
+		self.p = p
 		self.width = width
 		self.heigh = heigh
 		self.streets=0
@@ -1352,14 +1793,19 @@ class Grid:
 				self.intersections.append(target)
 			
 			#autosemaphore
-			if len(target.origin)>1:
-			#target.origin[0].semaphore.append(origin)
-			#target.origin[0].origin[0].semaphore.append(origin.origin[0])
+			if self.p.yellowBox:
 				for d in target.destination:
-				#d.semaphore.append(origin)
-					d.semaphore.append(target)
-			if len(origin.origin)>1:
-				target.semaphore.append(origin)
+					d.semaphore.append(origin)
+			else:
+				if len(target.origin)>1:
+				#target.origin[0].semaphore.append(origin)
+				#target.origin[0].origin[0].semaphore.append(origin.origin[0])
+					
+					for d in target.destination:
+					#d.semaphore.append(origin)
+						d.semaphore.append(target)
+				if len(origin.origin)>1:
+					target.semaphore.append(origin)
 
 class Buscador:
 	def __init__(self):#,profundidad):
@@ -1400,20 +1846,20 @@ class Car:
 		# A percentage of cars have CS Queue Query
 		self.csqueuequery=False
 		self.csreserve=False
-		if self.id<p.aStarCSQueueQuery*p.numberCars:
-			self.csqueuequery=True
-			if self.id<p.aStarCSQueueQuery*p.aStarCSReserve*p.numberCars:
-				self.csreserve=True
+		#if self.id<p.aStarCSQueueQuery*p.numberCars:
+		#	self.csqueuequery=True
+		#	if self.id<p.aStarCSQueueQuery*p.aStarCSReserve*p.numberCars:
+		#		self.csreserve=True
 
 		# initial moves must be enough to reach the CS at least
-		dis,_,cs=self.localizeCS(cell,t)	
-
-		if self.moves<dis:
-			self.target2=cs.cell
-			cell.car=None
-			self.cell=cs.cell
-			self.enterOnCS()
-			#self.moves=dis
+		if CAR_PROPERTIES[self.p.type].needsCharging:
+			dis,_,cs=self.localizeCS(cell,t)	
+			if self.moves<dis:
+				self.target2=cs.cell
+				cell.car=None
+				self.cell=cs.cell
+				self.enterOnCS()
+				#self.moves=dis
 		
 		self.toCell=[]
 
@@ -1496,7 +1942,7 @@ class Car:
 			print("Error in move, no neighbor")
 
 	def enterOnCS(self):
-		if not self.isCharging():
+		if not self.isCharging() and CAR_PROPERTIES[self.p.type].needsCharging:
 			# enter on CS
 			self.cell.car=None
 			self.cell=None
@@ -1517,13 +1963,15 @@ class Car:
 	def calculateRoute(self,cell,t):
 		dis,ire=self.aStar(cell,self.target,t)
 
-		if self.p.type==CarType.ICEV:
+		if self.p.type !=CarType.EV:
 			# If the car is ICEV, it will not need to recharge
-			self.toCell=[ire[0]] # HACKED QUITAR [] y [0]
+			self.toCell=ire#[ire[0]] para calcular en cada movimiento
 			return 
 
 		if len(ire)==0:
+			file_name = os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
 			print("Error: in data structure of A*")
+			print(file_name)
 		dis2,_,_=self.localizeCS(self.target,t)
 		if self.moves<dis+dis2:
 			self.state=CarState.ToCharging
@@ -1567,10 +2015,34 @@ class Car:
 			calculateNext(cell)
 			toCell=self.toCell.pop(0)
 
-		if toCell.t==t or toCell.car!=None:
-			if self.p.yellowBox:
-				for s in cell.semaphore:
-					s.t=t
+		#if toCell.t==t or toCell.car!=None:
+		#	if self.p.yellowBox:
+		#		for s in cell.semaphore:
+		#			s.t=t
+		isStop=toCell.t==t or toCell.car!=None
+		if not isStop and (len(toCell.destination)>1 or len(toCell.origin)>1):
+			if 1==len(toCell.destination):
+				toCell2=toCell.destination[0]
+			elif 0<len(self.toCell):
+				toCell2=self.toCell[0]
+			else:
+				calculateNext(toCell)
+				toCell2=self.toCell[0]
+			isStop=toCell2.t==t or toCell2.car!=None
+
+			if isStop:
+				# Ten cicles waiting, move to the other cell if possible
+				if t-toCell2.t0>10:
+					for other in toCell.destination:
+						if other!=toCell2 and other.car==None:
+							isStop=False
+							self.toCell=[other]
+							break
+
+		if isStop: 
+			for s in cell.semaphore:
+				s.t=t+1
+			
 			cell.occupation+=1
 			if 0<self.p.aStarUseCellExponentialWeight:
 				a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1589,13 +2061,14 @@ class Car:
 		# identifica si es ilegal, no join
 		# self.checkLegalMove(cell,toCell)
 		#print("(",cell.x,",",cell.y,") -> (",toCell.x,",",toCell.y,")")
-		if self.p.yellowBox:
-			for s in toCell.semaphore:
-				s.t=t
+		#if self.p.yellowBox:
+		#	for s in toCell.semaphore:
+		#		s.t=t
 		self.cell = toCell
 		cell.car = None
 		toCell.car = self
 		cell.t=t
+		toCell.t0=t
 		cell.occupation+=1/cell.velocity
 		if 0<self.p.aStarUseCellExponentialWeight:
 			a=math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)
@@ -1606,9 +2079,9 @@ class Car:
 			cell.exponentialOccupation=cell.exponentialOccupation*a+d*1/cell.velocity
 			#cell.exponentialOccupation=cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-cell.exponentialLastT)+(1-self.p.aStarUseCellExponentialWeight)*1/cell.velocity
 			cell.exponentialLastT=t
-		if not self.p.yellowBox:
-			for s in cell.semaphore:
-				s.t=t
+		#if not self.p.yellowBox:
+		#	for s in cell.semaphore:
+		#		s.t=t
 
 
 		# Calculate priority
@@ -1762,6 +2235,12 @@ class Car:
 					b=1-a
 					currentTime=cell.exponentialOccupation*a+b*1/cell.velocity
 				else:
+					'''
+					if self.p.pollutionRouting:
+						currentTime=cell.pollutionLevel/cell.t
+					else:
+						currentTime=cell.occupation/cell.t
+					'''
 					currentTime=cell.occupation/cell.t
 			else:
 				currentTime=1/cell.velocity
@@ -1928,18 +2407,22 @@ class Car:
 					worst.backup() 
 
 					worst.setCell(self.grid,d,target,best.distance+1)
-					if self.p.aStarUseCellAverageVelocity and 0<cell.t:
-						if 0<self.p.aStarUseCellExponentialWeight:
-							a=math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
-							b=1-a
-							worst.time=best.time+best.cell.exponentialOccupation*a+b*1/best.cell.velocity							
-							#worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
-						else:
-							worst.time=best.time+cell.occupation/cell.t
+					if self.p.pollutionRouting:
+						worst.time=best.time+cell.pollutionLevel#/cell.t
 					else:
-						worst.time=best.time+1/best.cell.velocity
-					if 0<self.p.aStarAddRoadCarAsTimeSteps and best.cell.car!=None:
-						worst.time+=self.p.aStarAddRoadCarAsTimeSteps
+						if self.p.aStarUseCellAverageVelocity and 0<cell.t:
+							if 0<self.p.aStarUseCellExponentialWeight:
+								a=math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+								b=1-a
+								worst.time=best.time+best.cell.exponentialOccupation*a+b*1/best.cell.velocity							
+								#worst.time=best.time+best.cell.exponentialOccupation*math.pow(self.p.aStarUseCellExponentialWeight,t-best.cell.exponentialLastT)
+							else:
+								worst.time=best.time+cell.occupation/cell.t
+								#worst.time=best.time+cell.occupation/cell.t
+						else:
+							worst.time=best.time+1/best.cell.velocity
+						if 0<self.p.aStarAddRoadCarAsTimeSteps and best.cell.car!=None:
+							worst.time+=self.p.aStarAddRoadCarAsTimeSteps
 
 						
 
@@ -2356,33 +2839,63 @@ def cartesianExperiment():
 	p=Parameters()
 	ps=p.metaExperiment(
 		#energy=[0.15,0.3,0.45,0.6,0.75,0.9],
-		seed=[12,34,56,78,90],
+		seed=[12,34,56,78],#,90],
+		buildings=[True,False],
+		distributionCS=[0,1,2],
 		#numberChargersPerBlock=[1,5,10],#cambiar por las 3 config
 		#aStarMethod=["Time"],#"Distance"],#solo tiempo, o también evitar contaminación?
 		#aStarCSQueueQuery=[0,0.25,0.5,0.75,1], 
 		#aStarCSQueueQuery=[0.5],#poner el óptimo (ver paper)
 		#aStarCSReserve=[0.5],#<= que el anterior, x primeros. ¿de los que consultan, qué porcentaje reservan? comprobar
-		densityCars=[0.05,0.1,0.15],#,#añadir porcentaje de tipos
-		percentageEV=[0,0.1,0.2,0.3,0.4,0.5,0.75,1],
-		percentageICEVDiesel=[0,0.05,0.1,0.2,0.5]
+		densityCars=[0.05, 0.15, 0.25, 0.5],#[0.05,0.1,0.15,0.25,0.5],#,#añadir porcentaje de tipos
+		densityEV=[0.05, 0.25, 0.45, 1, 0],#[0.05, 0.1, 0.15, 0.2, 0.25, 0.5, 1],#[10,20,30,40,50,75,100],
+		densityDiesel=[0.05, 0.35, 0.65, 1, 0],#[0, 0.05, 0.10, 0.25, 0.4, 0.5, 0.6],
+		windV = [
+			(0, 0),  # Deja los ceros como enteros
+			(np.float32(0.1), 0),
+			(np.float32(0.2), 0),
+			(np.float32(0.1), np.float32(0.1)),
+			(np.float32(0.2), np.float32(0.1))
+		],
+		pollutionRouting=[False,True]#,True]
+		#(WE,WN)
+		#[0,5,10,20,50]
 		#aStarUseCellExponentialWeight=[0.5],#mirar cuál daba mejores resultados y usar solo ese ('0.95??)
 		#reserveCS=[False], # it has been removed because legend is too long
 	)
 	ps2=[]
 	for p in ps:
 		ok=True
+		'''
 		if p.aStarMethod=="Distance":
 			if p.aStarCSQueueQuery!=0:
 				ok=False
 			if p.aStarUseCellExponentialWeight!=0.95:
 				ok=False
+		'''
+		if p.densityEV+p.densityDiesel>1:
+			ok=False
+		if p.densityCars>0.25 and (p.seed,p.buildings,p.distributionCS,p.windV,p.densityEV,p.densityDiesel,p.pollutionRouting)!=(12,True,1,(0.1,0),0.25,0.35,False):
+			ok=False
+		if p.densityEV+p.densityDiesel==1 and (p.seed,p.buildings,p.distributionCS,p.windV,p.densityCars,p.pollutionRouting)!=(12,True,1,(0.1,0),0.15,False):
+			ok=False
+		if p.densityEV+p.densityDiesel==0 and (p.seed,p.buildings,p.distributionCS,p.windV,p.densityCars,p.pollutionRouting)!=(12,True,1,(0.1,0),0.15,False):
+			ok=False
+		if (p.densityEV,p.densityDiesel) in [(0,0.05),(0,0.65),(0.05,0),(0.45,0)]:
+			ok=False
+		if (p.densityEV,p.densityDiesel) in [(0,0.35),(0.25,0),(0,0)] and (p.seed,p.buildings,p.distributionCS,p.windV,p.densityCars,p.pollutionRouting)!=(12,True,1,(0.1,0),0.15,False):
+			ok=False
+
 		if ok:
 			p.id=len(ps2)
 			ps2.append(p)
 	return ps2
 
-def experiment(i,view=False,cache=True,indiv=None, returnFits = False, contaminationExp = False, numTimesteps = 100, delta = 0.1, corner_factor = 1, gamma = 0.1, acc = None, dif_matrix = None, wind = None):
+def experiment(i,run_all=True,view=False,cache=False,indiv=None, returnFits = False, contaminationExp = False, numTimesteps = 2000, delta = 0.1, corner_factor = 1, gamma = 0.01, acc = None, dif_matrix = None, wind = None):
 	p=cartesianExperiment()[i]
+
+	for cartype in CAR_PROPERTIES:
+		CAR_PROPERTIES[cartype].number=0
 
 	#if exists file of experiment, skip
 	if cache:
@@ -2398,20 +2911,27 @@ def experiment(i,view=False,cache=True,indiv=None, returnFits = False, contamina
 	p.aStarCSReserve=0.5#<= que el anterior, x primeros. ¿de los que consultan, qué porcentaje reservan? comprobar
 	#densityCars=[0.05,0.1],#añadir porcentaje de tipos
 	p.aStarUseCellExponentialWeight=0.5
-	city=City(p,indiv)
 
 	if view:
-		print("Running experiment: "+p.legendName)
+		city=City(p,indiv)
+		#print("Running experiment: "+p.legendName)
 		city.plot(True)
 	else:
-		print("Running experiment: "+p.legendName)
-		if returnFits:
-			global_fit, local_fit = city.runWithoutPlot(numTimesteps, returnFits, delta, corner_factor, gamma, acc, dif_matrix, wind)
-			return global_fit, local_fit
-		elif contaminationExp:
-			city.runWithoutPlot(numTimesteps, returnFits, contaminationExp, delta, corner_factor, gamma, acc, dif_matrix, wind)
+		#print("Running experiment: "+p.legendName)
+		if run_all:
+			cont = ContaminationExperiment(numExperiment=i,buildings=p.buildings,distributionCS=p.distributionCS,windV=p.windV)
+			indiv = cont.individual
+			city=City(p,indiv)
+			city.runWithoutPlot(times=cont.num_timesteps,returnFits=False,contaminationExp=True,delta=cont.delta,corner_factor=cont.corner_factor,gamma=cont.gamma,acc=cont.acc,dif_matrix=cont.dif_matrix,wind=cont.wind,names=(p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting))
 		else:
-			city.runWithoutPlot(numTimesteps) #HACKed antes valía 1000
+			city=City(p,indiv)
+			if returnFits:
+				global_fit, local_fit = city.runWithoutPlot(numTimesteps, returnFits, delta, corner_factor, gamma, acc, dif_matrix, wind)
+				return global_fit, local_fit
+			elif contaminationExp:
+				city.runWithoutPlot(numTimesteps, returnFits, contaminationExp, delta, corner_factor, gamma, acc, dif_matrix, wind)
+			else:
+				city.runWithoutPlot(numTimesteps) #HACKed antes valía 1000
 		
 		#stats=Stats(p)
 		#stats.plotCS(False)
@@ -2502,7 +3022,7 @@ class Genetic:
 		self.population_size = multiprocessing.cpu_count()
 		#self.max_num_stations = 5
 		self.num_chargers = 45
-		self.num_timesteps = 2000
+		self.num_timesteps = 500
 		#self.distance = lambda x,y : np.sqrt((x[0]-y[0])**2+(x[1]-y[1])**2)
 		self.lim_distance = 10
 		self.num_generations: int = 1000
@@ -2659,7 +3179,7 @@ class Genetic:
 			return (key,self.simulation_cache[key])
 		#SimulationResult = namedtuple('SimulationResult', ['global_fit', 'local_fit'])
 		# Here you run your simulation
-		exp_result = experiment(self.numExperiment,view=False,cache=False, indiv = individual, returnFits = True, numTimesteps = self.num_timesteps, delta = self.delta, corner_factor = self.corner_factor, gamma = self.gamma, acc = self.acc, dif_matrix = self.dif_matrix, wind = self.wind)
+		exp_result = experiment(self.numExperiment,run_all=False,view=False,cache=False, indiv = individual, returnFits = True, numTimesteps = self.num_timesteps, delta = self.delta, corner_factor = self.corner_factor, gamma = self.gamma, acc = self.acc, dif_matrix = self.dif_matrix, wind = self.wind)
 		result = SimulationResult(global_fit = exp_result[0], local_fit = exp_result[1]) #TERMINAR DE ARREGLAR
 		#indiv = individual.stations
 		#M = len(indiv)
@@ -2795,14 +3315,17 @@ class Genetic:
 		plt.show()
 
 class ContaminationExperiment:
-	def __init__(self,numExperiment, simulation_cache={}) -> None:
-		numExperiment=43
+	def __init__(self,numExperiment=43, buildings = True, distributionCS=0, windV=(0.1,0)) -> None:
+		#numExperiment=0
 		self.numExperiment = numExperiment
-		self.population_size = multiprocessing.cpu_count()
+		self.buildings = buildings
+		self.distributionCS=distributionCS#should be in 0,1,2.
+		self.windV = windV
+		#self.population_size = multiprocessing.cpu_count()
 		#self.max_num_stations = 5
-		self.num_chargers = 2
-		self.num_timesteps = 100
-		numExperiment=0
+		self.num_chargers = 72
+		self.num_timesteps = 2000
+		#numExperiment=0
 		p=cartesianExperiment()[numExperiment]
 		p.listgenerator=True
 		p.numberChargingPerStation=0
@@ -2811,7 +3334,7 @@ class ContaminationExperiment:
 		for k in g:
 			print(k)
 			break
-		self.distance = lambda x,y: self.aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
+		#self.distance = lambda x,y: self.aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
 		self.valid_coordinates = city1.listgenerator
 
 		#print((140,144) in self.valid_coordinates)
@@ -2860,51 +3383,57 @@ class ContaminationExperiment:
 		'''
 
 		(n_rows, n_cols) = city1.sizes
-		self.delta = 0.1  # Diffusion parameter
+		self.delta = np.float32(0.1)  # Diffusion parameter
 		self.corner_factor = 1#/np.sqrt(2)
-		self.gamma = 0.00 # Lost to the atmosphere
-		acc = np.zeros((n_rows+2, n_cols+2))
-		for x,y in self.valid_coordinates:
-			acc[x,y] = 1
+		self.gamma = np.float32(0.01) # Lost to the atmosphere
+
+		if self.buildings:
+			acc = np.zeros((n_rows+2, n_cols+2))
+			for x,y in self.valid_coordinates:
+				acc[x,y] = 1
+
+			sidewalk = True
+			
+			if sidewalk:
+				acc[45:52,:]=1
+				acc[:,45:52]=1
+				acc[141:148,:]=1
+				acc[:,141:148]=1
+				acc[237:244,:]=1
+				acc[:,237:244]=1
+
+				l=list(range(0,10))+list(range(85,106))+list(range(181,202))+list(range(277,287))
+				for i in l:
+					for j in l:
+						acc[i+1,j+1]=1
 		
-		if True:
-			acc[45:52,:]=1
-			acc[:,45:52]=1
-			acc[141:148,:]=1
-			acc[:,141:148]=1
-			acc[237:244,:]=1
-			acc[:,237:244]=1
 
-			l=list(range(0,10))+list(range(85,106))+list(range(181,202))+list(range(277,287))
-			for i in l:
-				for j in l:
-					acc[i+1,j+1]=1
-	
+			acc[0,:]=1
+			acc[-1,:]=1
+			acc[:,0]=1
+			acc[:,-1]=1
 
-		acc[0,:]=1
-		acc[-1,:]=1
-		acc[:,0]=1
-		acc[:,-1]=1
+			#acc[:,:]=1
 
-		#acc[:,:]=1
+			#print(acc[50,146])
+			acc_neig_edge = (
+				acc[0:-2, 1:-1] + acc[2:, 1:-1] +
+				acc[1:-1, 0:-2] + acc[1:-1, 2:]
+			)
+			acc_neig_corner = (
+				acc[0:-2, 0:-2] + acc[2:, 2:] +
+				acc[2:, 0:-2] + acc[0:-2, 2:]
+			)
 
-		#print(acc[50,146])
-		acc_neig_edge = (
-			acc[0:-2, 1:-1] + acc[2:, 1:-1] +
-			acc[1:-1, 0:-2] + acc[1:-1, 2:]
-		)
-		acc_neig_corner = (
-			acc[0:-2, 0:-2] + acc[2:, 2:] +
-			acc[2:, 0:-2] + acc[0:-2, 2:]
-		)
-
-		if True: #Aceras
-			for i in range(1,n_rows+1):
-				for j in range(1,n_cols+1):
-					if acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]:
-						if (i in range(2,n_rows) and j in range(2,n_cols)) or acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]>3:
-						#if 1<i<n_rows and 1<j<n_cols:
-							acc[i,j]=1
+			if sidewalk: #Aceras
+				for i in range(1,n_rows+1):
+					for j in range(1,n_cols+1):
+						if acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]:
+							if (i in range(2,n_rows) and j in range(2,n_cols)) or acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]>3:
+							#if 1<i<n_rows and 1<j<n_cols:
+								acc[i,j]=1
+		else:
+			acc = np.ones((n_rows+2, n_cols+2))
 
 		acc_neig_edge = (
 			acc[0:-2, 1:-1] + acc[2:, 1:-1] +
@@ -2930,44 +3459,55 @@ class ContaminationExperiment:
 		
 		self.acc = acc[1:-1, 1:-1]
 		self.dif_matrix = dif_matrix
-		WN = 0 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
-		WE = 0.1 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
-		sign_WN = np.sign(WN).astype(int)
-		sign_WE = np.sign(WE).astype(int)
-		displ_N = np.zeros_like(WN)
-		displ_S = np.zeros_like(WN)
-		displ_E = np.zeros_like(WN)
-		displ_W = np.zeros_like(WN)
-		displ_NW = np.zeros_like(WN)
-		displ_NE = np.zeros_like(WN)
-		displ_SW = np.zeros_like(WN)
-		displ_SE = np.zeros_like(WN)
-		stays = np.ones_like(WN)
+		self.WN = self.windV[1]# * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		self.WE = self.windV[0]# * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		sign_WN = np.sign(self.WN).astype(int)
+		sign_WE = np.sign(self.WE).astype(int)
+		displ_N = np.zeros((n_rows+2, n_cols+2))#np.zeros_like(self.WN)
+		displ_S = np.zeros_like(displ_N)
+		displ_E = np.zeros_like(displ_N)
+		displ_W = np.zeros_like(displ_N)
+		displ_NW = np.zeros_like(displ_N)
+		displ_NE = np.zeros_like(displ_N)
+		displ_SW = np.zeros_like(displ_N)
+		displ_SE = np.zeros_like(displ_N)
+		stays = np.ones_like(displ_N)
 		for p in range(1, n_rows+1):
 			for q in range(1, n_cols+1):
-					displ_N[p,q, :] = acc[p,q] * np.maximum(WN[p, q,:], 0) * (1 - np.maximum(acc[p + sign_WE[p,q,:], q - 1], acc[p + sign_WE[p,q,:], q]) * abs(WE[p, q, :])) * acc[p, q - 1]
-					displ_S[p,q, :] = acc[p,q] * np.maximum(-WN[p, q,:],0) * (1 - np.maximum(acc[p + sign_WE[p,q,:], q + 1], acc[p + sign_WE[p,q,:], q]) * abs(WE[p, q, :])) * acc[p, q + 1]
-					displ_E[p,q, :] = acc[p,q] * np.maximum(WE[p, q,:], 0) * (1 - np.maximum(acc[p + 1, q - sign_WN[p,q,:]], acc[p, q - sign_WN[p,q,:]]) * abs(WN[p, q, :])) * acc[p + 1, q]
-					displ_W[p,q, :] = acc[p,q] * np.maximum(-WE[p, q,:],0) * (1 - np.maximum(acc[p - 1, q - sign_WN[p,q,:]], acc[p, q - sign_WN[p,q,:]]) * abs(WN[p, q, :])) * acc[p - 1, q]
-					displ_NE[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(WE[p, q,:], 0) * acc[p + 1, q - 1]
-					displ_NW[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q - 1]
-					displ_SE[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(WE[p, q,:], 0) * acc[p + 1, q + 1]
-					displ_SW[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q + 1]
+					displ_N[p,q] = acc[p,q] * np.maximum(self.WN, 0) * (1 - np.maximum(acc[p + sign_WE, q - 1], acc[p + sign_WE, q]) * abs(self.WE)) * acc[p, q - 1]
+					displ_S[p,q] = acc[p,q] * np.maximum(-self.WN,0) * (1 - np.maximum(acc[p + sign_WE, q + 1], acc[p + sign_WE, q]) * abs(self.WE)) * acc[p, q + 1]
+					displ_E[p,q] = acc[p,q] * np.maximum(self.WE, 0) * (1 - np.maximum(acc[p + 1, q - sign_WN], acc[p, q - sign_WN]) * abs(self.WN)) * acc[p + 1, q]
+					displ_W[p,q] = acc[p,q] * np.maximum(-self.WE,0) * (1 - np.maximum(acc[p - 1, q - sign_WN], acc[p, q - sign_WN]) * abs(self.WN)) * acc[p - 1, q]
+					displ_NE[p,q] = acc[p,q] * np.maximum(self.WN, 0) * np.maximum(self.WE, 0) * acc[p + 1, q - 1]
+					displ_NW[p,q] = acc[p,q] * np.maximum(self.WN, 0) * np.maximum(-self.WE,0) * acc[p - 1, q - 1]
+					displ_SE[p,q] = acc[p,q] * np.maximum(-self.WN,0) * np.maximum(self.WE, 0) * acc[p + 1, q + 1]
+					displ_SW[p,q] = acc[p,q] * np.maximum(-self.WN,0) * np.maximum(-self.WE,0) * acc[p - 1, q + 1]
 		stays += -(displ_N + displ_S + displ_E + displ_W + displ_NE + displ_NW + displ_SE + displ_SW)
-		self.wind = (displ_N[1:-1, 2:, :], displ_S[1:-1, :-2, :], displ_E[:-2, 1:-1, :], displ_W[2:, 1:-1, :], displ_NE[:-2, 2:, :], displ_NW[2:, 2:, :], displ_SE[:-2, :-2, :], displ_SW[2:, :-2, :], stays[1:-1, 1:-1, :])
-		self.simulation_cache = simulation_cache
+		self.wind = (displ_N[1:-1, 2:], displ_S[1:-1, :-2], displ_E[:-2, 1:-1], displ_W[2:, 1:-1], displ_NE[:-2, 2:], displ_NW[2:, 2:], displ_SE[:-2, :-2], displ_SW[2:, :-2], stays[1:-1, 1:-1])
+
+		individual1 = Individual([GChargingStation((137,142),self.num_chargers)])#Individual([GChargingStation((140,144),self.num_chargers)])
+		#individual2 = Individual([GChargingStation((51,65),self.num_chargers//4), GChargingStation((51,224),self.num_chargers//4), GChargingStation((220,51),self.num_chargers//4), GChargingStation((220,237),self.num_chargers//4)])
+		individual2 = Individual([GChargingStation((213,45),self.num_chargers//4), GChargingStation((45,74),self.num_chargers//4), GChargingStation((74,243),self.num_chargers//4), GChargingStation((243,213),self.num_chargers//4)])
+		#individual3 = Individual([GChargingStation((31,32),self.num_chargers//36), GChargingStation((31,64),self.num_chargers//36), GChargingStation((31,128),self.num_chargers//36), GChargingStation((31,160),self.num_chargers//36), GChargingStation((31,224),self.num_chargers//36), GChargingStation((31,256),self.num_chargers//36),
+		#				   GChargingStation((64,31),self.num_chargers//36), GChargingStation((64,64),self.num_chargers//36), GChargingStation((64,127),self.num_chargers//36), GChargingStation((64,160),self.num_chargers//36), GChargingStation((64,223),self.num_chargers//36), GChargingStation((64,256),self.num_chargers//36),
+		#				   GChargingStation((127,32),self.num_chargers//36), GChargingStation((127,64),self.num_chargers//36), GChargingStation((127,128),self.num_chargers//36), GChargingStation((127,160),self.num_chargers//36), GChargingStation((127,224),self.num_chargers//36), GChargingStation((127,256),self.num_chargers//36),
+		#				   GChargingStation((160,31),self.num_chargers//36), GChargingStation((160,64),self.num_chargers//36), GChargingStation((160,127),self.num_chargers//36), GChargingStation((160,160),self.num_chargers//36), GChargingStation((160,223),self.num_chargers//36), GChargingStation((160,256),self.num_chargers//36),
+		#				   GChargingStation((223,32),self.num_chargers//36), GChargingStation((223,64),self.num_chargers//36), GChargingStation((223,128),self.num_chargers//36), GChargingStation((223,160),self.num_chargers//36), GChargingStation((223,224),self.num_chargers//36), GChargingStation((223,256),self.num_chargers//36),
+		#				   GChargingStation((256,31),self.num_chargers//36), GChargingStation((256,64),self.num_chargers//36), GChargingStation((256,127),self.num_chargers//36), GChargingStation((256,160),self.num_chargers//36), GChargingStation((256,223),self.num_chargers//36), GChargingStation((256,256),self.num_chargers//36)])
+		individual3 = Individual([GChargingStation((45,21),self.num_chargers//36), GChargingStation((45,117),self.num_chargers//36), GChargingStation((45,213),self.num_chargers//36), GChargingStation((51,74),self.num_chargers//36), GChargingStation((51,170),self.num_chargers//36), GChargingStation((51,266),self.num_chargers//36),
+						GChargingStation((141,21),self.num_chargers//36), GChargingStation((141,117),self.num_chargers//36), GChargingStation((141,213),self.num_chargers//36), GChargingStation((147,74),self.num_chargers//36), GChargingStation((147,170),self.num_chargers//36), GChargingStation((147,266),self.num_chargers//36),
+						GChargingStation((237,21),self.num_chargers//36), GChargingStation((237,117),self.num_chargers//36), GChargingStation((237,213),self.num_chargers//36), GChargingStation((243,74),self.num_chargers//36), GChargingStation((243,170),self.num_chargers//36), GChargingStation((243,266),self.num_chargers//36),
+						GChargingStation((21,51),self.num_chargers//36), GChargingStation((74,45),self.num_chargers//36), GChargingStation((117,51),self.num_chargers//36), GChargingStation((170,45),self.num_chargers//36), GChargingStation((213,51),self.num_chargers//36), GChargingStation((266,45),self.num_chargers//36),
+						GChargingStation((21,147),self.num_chargers//36), GChargingStation((74,141),self.num_chargers//36), GChargingStation((117,147),self.num_chargers//36), GChargingStation((170,141),self.num_chargers//36), GChargingStation((213,147),self.num_chargers//36), GChargingStation((266,141),self.num_chargers//36),
+						GChargingStation((21,243),self.num_chargers//36), GChargingStation((74,237),self.num_chargers//36), GChargingStation((117,243),self.num_chargers//36), GChargingStation((170,237),self.num_chargers//36), GChargingStation((213,243),self.num_chargers//36), GChargingStation((266,237),self.num_chargers//36)])
+		
+		self.individuals = [individual1,individual2,individual3]
+		self.individual = self.individuals[self.distributionCS]
 
 	def run(self):
-		#individual = Individual([GChargingStation((140,144),self.num_chargers)])
-		#individual = Individual([GChargingStation((51,65),self.num_chargers), GChargingStation((51,224),self.num_chargers), GChargingStation((220,51),self.num_chargers), GChargingStation((220,237),self.num_chargers)])
-		individual = Individual([GChargingStation((31,32),self.num_chargers), GChargingStation((31,64),self.num_chargers), GChargingStation((31,128),self.num_chargers), GChargingStation((31,160),self.num_chargers), GChargingStation((31,224),self.num_chargers), GChargingStation((31,256),self.num_chargers),
-						   GChargingStation((64,31),self.num_chargers), GChargingStation((64,64),self.num_chargers), GChargingStation((64,127),self.num_chargers), GChargingStation((64,160),self.num_chargers), GChargingStation((64,223),self.num_chargers), GChargingStation((64,256),self.num_chargers),
-						   GChargingStation((127,32),self.num_chargers), GChargingStation((127,64),self.num_chargers), GChargingStation((127,128),self.num_chargers), GChargingStation((127,160),self.num_chargers), GChargingStation((127,224),self.num_chargers), GChargingStation((127,256),self.num_chargers),
-						   GChargingStation((160,31),self.num_chargers), GChargingStation((160,64),self.num_chargers), GChargingStation((160,127),self.num_chargers), GChargingStation((160,160),self.num_chargers), GChargingStation((160,223),self.num_chargers), GChargingStation((160,256),self.num_chargers),
-						   GChargingStation((223,32),self.num_chargers), GChargingStation((223,64),self.num_chargers), GChargingStation((223,128),self.num_chargers), GChargingStation((223,160),self.num_chargers), GChargingStation((223,224),self.num_chargers), GChargingStation((223,256),self.num_chargers),
-						   GChargingStation((256,31),self.num_chargers), GChargingStation((256,64),self.num_chargers), GChargingStation((256,127),self.num_chargers), GChargingStation((256,160),self.num_chargers), GChargingStation((256,223),self.num_chargers), GChargingStation((256,256),self.num_chargers)])
+		#[self.distributionCS]
 		# returnFits must be false so that contaminationExp is used.
-		experiment(self.numExperiment,view=False,cache=False, indiv = individual, returnFits = False, contaminationExp = True, numTimesteps = self.num_timesteps, delta = self.delta, corner_factor = self.corner_factor, gamma = self.gamma, acc = self.acc, dif_matrix = self.dif_matrix, wind = self.wind)
+		experiment(self.numExperiment,run_all=False,view=False,cache=False, indiv = self.individual, returnFits = False, contaminationExp = True, numTimesteps = self.num_timesteps, delta = self.delta, corner_factor = self.corner_factor, gamma = self.gamma, acc = self.acc, dif_matrix = self.dif_matrix, wind = self.wind)
 
 
 
@@ -2975,14 +3515,14 @@ class ContaminationExperiment:
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': None, 'run': None, 'all': False, 'stats': False, 'contamination':False}
+	default_values = {'list': None, 'view': None, 'run': None, 'all': True, 'stats': False,'contamination':False, 'genetic':False}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
-	parser.add_argument('--list', action='store_true', help='List all experiments')
+	parser.add_argument('--list', action='store_true', help='List all experiments', default=default_values['list'])
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
-	parser.add_argument('--run', type=int, help='Run a specific experiment by index')
-	parser.add_argument('--all', action='store_true', help='Run all experiments in the background')
-	parser.add_argument('--stats', action='store_true', help='Generate meta statistics')
-	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option')
+	parser.add_argument('--run', type=int, help='Run a specific experiment by index', default=default_values['run'])
+	parser.add_argument('--all', action='store_true', help='Run all experiments in the background', default=default_values['all'])
+	parser.add_argument('--stats', action='store_true', help='Generate meta statistics', default=default_values['stats'])
+	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option', default=default_values['genetic'])
 	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments', default=default_values['contamination'])
 	#parser.add_argument()
 
@@ -3020,13 +3560,18 @@ if __name__ == '__main__':
 				g.run()
 			else:
 				#for gamma in [0.05, 0.1, 0.2]:#0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2]:#0.00, 0.01, 0.02, 0.03, 0.04,
-					g = ContaminationExperiment(args.run)
+					g = ContaminationExperiment(numExperiment=args.run)
 				#	g.gamma=gamma
 					g.run()
 
+
+
 		if args.all:
 			start_time = time.time()
-			num_processors = multiprocessing.cpu_count()
+			numberExperiments = len(ps)
+			#print('Hay ', numberExperiments, ' experimentos.')
+			num_processors = multiprocessing.cpu_count()-1
+			print('Hay ', num_processors, 'cores.')
 			'''
 			ps2 = []
 			for i in range(0, len(ps), 50):
@@ -3037,12 +3582,43 @@ if __name__ == '__main__':
 					pool.map(experiment, range(len(ps)))
 				print(f'Finished {i+1}/{len(ps2)}')
 			'''
-			with multiprocessing.Pool(num_processors) as pool:
-				pool.map(experiment, range(len(ps)))
 
+			experiments_to_run = []
+			print(numberExperiments)
+			for i in range(numberExperiments):
+				p = ps[i]
+				file_name = os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
+				if p.densityCars <= 0.25 and (not p.buildings or p.pollutionRouting):# not os.path.isfile(file_name) and
+					experiments_to_run.append(i)
+			print('Number of experiments: ', len(experiments_to_run))
+
+			ps2 = []
+			batchSize = (num_processors)#//2
+			for i in range(0, len(experiments_to_run), batchSize):
+				ps2.append(experiments_to_run[i:i+batchSize])
+			'''
+			for i in experiments_to_run:
+				experiment(i)
+				print('Finished ', i)
+			'''			
+			for i, _ in enumerate(ps2):
+				with multiprocessing.Pool(num_processors) as pool:
+					pool.map(experiment, ps2[i])
+				# Forzamos la liberación de memoria
+				pool.close()
+				pool.join()
+				del pool
+				gc.collect()  # Forzamos la recolección de basura
+
+				print(f'Finished {i+1}/{len(ps2)}')
+				print((time.time()-start_time)/3600, 'hours.')
+			'''
+			with multiprocessing.Pool(num_processors-1) as pool:
+				pool.map(experiment, experiments_to_run[:30])#range(len(ps)))
+			'''
 			end_time = time.time()
 			duration = end_time - start_time
-			print(f'Total time: {duration:.2f} seconds')
+			#print(f'Total time: {duration:.2f} seconds')
 
 		if args.stats:
 			ms = MetaStats()
