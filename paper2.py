@@ -2376,12 +2376,13 @@ class Car:
 					best=opening[i]
 
 			if best==None:
+				print('Error tipo 1')
 				return bestTarget
 			# is valid?
 			if bestTarget!=None and bestTarget.heuristic()<best.heuristic():
 				return bestTarget
 			if best==None:
-					print("best is None")
+				print("best is None")
 			return best
 
 		def selectWorst():
@@ -2445,6 +2446,12 @@ class Car:
 
 			# stops criterias:
 			# if reached target and others are worst
+
+			#HACKED
+			if best==None:
+				file_name = os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
+				print('Here is the error: ', file_name)
+
 			if best.cell==target:
 				stopCriteria=True
 				for d in opening:
@@ -3515,7 +3522,7 @@ class ContaminationExperiment:
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': None, 'run': None, 'all': True, 'stats': False,'contamination':False, 'genetic':False}
+	default_values = {'list': None, 'view': None, 'run': None, 'all': True, 'stats': False,'contamination':False, 'genetic':False, 'timeout':7200, 'processes':0}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
 	parser.add_argument('--list', action='store_true', help='List all experiments', default=default_values['list'])
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
@@ -3524,6 +3531,8 @@ if __name__ == '__main__':
 	parser.add_argument('--stats', action='store_true', help='Generate meta statistics', default=default_values['stats'])
 	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option', default=default_values['genetic'])
 	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments', default=default_values['contamination'])
+	parser.add_argument('--timeout', type=int, help='Timeout to execute a pool of process', default=default_values['timeout'])
+	parser.add_argument('--processes', type=int, help='CPUs to use', default=default_values['processes'])
 	#parser.add_argument()
 
 	# 44
@@ -3570,7 +3579,14 @@ if __name__ == '__main__':
 			start_time = time.time()
 			numberExperiments = len(ps)
 			#print('Hay ', numberExperiments, ' experimentos.')
-			num_processors = multiprocessing.cpu_count()-1
+			#num_processors = multiprocessing.cpu_count()-1
+			if args.processes == 0:
+				num_processors = multiprocessing.cpu_count()-1
+			else:
+				num_processors = args.p
+			def transform_time(t):
+				return datetime.datetime.fromtimestamp(t).strftime("%H:%M:%S")
+			timeout = args.timeout
 			print('Hay ', num_processors, 'cores.')
 			'''
 			ps2 = []
@@ -3588,7 +3604,7 @@ if __name__ == '__main__':
 			for i in range(numberExperiments):
 				p = ps[i]
 				file_name = os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
-				if p.densityCars <= 0.25 and (not p.buildings or p.pollutionRouting):# not os.path.isfile(file_name) and
+				if not os.path.isfile(file_name) and p.densityCars <= 0.25 and not p.buildings: #or p.pollutionRouting:# 
 					experiments_to_run.append(i)
 			print('Number of experiments: ', len(experiments_to_run))
 
@@ -3600,7 +3616,7 @@ if __name__ == '__main__':
 			for i in experiments_to_run:
 				experiment(i)
 				print('Finished ', i)
-			'''			
+
 			for i, _ in enumerate(ps2):
 				with multiprocessing.Pool(num_processors) as pool:
 					pool.map(experiment, ps2[i])
@@ -3612,10 +3628,36 @@ if __name__ == '__main__':
 
 				print(f'Finished {i+1}/{len(ps2)}')
 				print((time.time()-start_time)/3600, 'hours.')
-			'''
+
 			with multiprocessing.Pool(num_processors-1) as pool:
 				pool.map(experiment, experiments_to_run[:30])#range(len(ps)))
 			'''
+
+
+
+		for i, exp2run in enumerate(ps2):
+			print(f"Init the {i+1}/{len(ps2)}; Hora -> {transform_time(time.time())}")
+			with multiprocessing.Pool(num_processors) as pool:
+				async_res = pool.map_async(experiment, exp2run)#range(len(ps)))
+
+				if timeout==0:
+					print("Desactivate timeout. ", transform_time(time.time()))
+					async_res.get()
+					pool.close()
+					pool.join()
+
+				else:
+					print("\tActivate timeout: ", timeout, ". ", transform_time(time.time()))
+					async_res.wait(timeout)
+					if async_res.ready():
+						print("\t\tAll process are finished correctly. ", transform_time(time.time()))
+					print(f"\tExperiments pack {i+1}/{len(ps2)} is finished. ", transform_time(time.time()))
+					pool.terminate()
+					pool.join()
+					print("Pool closed")
+
+
+			
 			end_time = time.time()
 			duration = end_time - start_time
 			#print(f'Total time: {duration:.2f} seconds')
