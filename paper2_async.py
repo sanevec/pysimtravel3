@@ -101,6 +101,7 @@ class Parameters:
 		#self.statsFileName="data/stats_" # paper1
 		self.statsFileName="paper2/stats_" 
 		self.metastatsFileName="paper2/metastats/"
+		self.dataSave="simulatioData"
 
 	def clone(self):
 		"""
@@ -980,13 +981,13 @@ class City:
 					break
 			del P
 			del G
-			np.savez_compressed(os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
+			np.savez_compressed(os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
 			del savedP
-			np.savez_compressed(os.path.join("simulationData32", f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
+			np.savez_compressed(os.path.join(dataSaveDir, f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
 			del savedG
-			np.savez_compressed(os.path.join("simulationData32", f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+			np.savez_compressed(os.path.join(dataSaveDir, f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
 			del averages
-			np.savez_compressed(os.path.join("simulationData32", f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
+			np.savez_compressed(os.path.join(dataSaveDir, f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
 			del map_cars
 			gc.collect()
 
@@ -1359,8 +1360,8 @@ class City:
 					flattened_G[f"{key1}_{key2}"] = array[:,:,saved_times].astype(np.float32)
 					averages[f"G_{key1}_{key2}"] = np.mean(array[:, :, times//4:], axis=2).astype(np.float32)
 
-			np.savez_compressed(os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_P)
-			np.savez_compressed(os.path.join("simulationData32", f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_G)
+			np.savez_compressed(os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_P)
+			np.savez_compressed(os.path.join(dataSaveDir, f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_G)
 			#p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting
 			#np.savez_compressed(f'G_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **flattened_G)
 			
@@ -1389,9 +1390,9 @@ class City:
 					flattened_map_cars[f"{key1}_{key2}"] = array[:,:,saved_times].astype(np.float32)
 					averages[f"cars_{key1}_{key2}"] = np.mean(array[:,:,times//4:], axis=2).astype(np.float32)		
 
-			np.savez_compressed(os.path.join("simulationData32", f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_map_cars)
+			np.savez_compressed(os.path.join(dataSaveDir, f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_map_cars)
 			#np.savez_compressed(f'cars_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **flattened_map_cars)#p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting
-			np.savez_compressed(os.path.join("simulationData32", f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+			np.savez_compressed(os.path.join(dataSaveDir, f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
 			#np.savez_compressed(f'averages_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **averages)
 			del flattened_map_cars
 			del averages
@@ -1969,9 +1970,10 @@ class Car:
 			return 
 
 		if len(ire)==0:
-			file_name = os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
-			print("Error: in data structure of A*")
-			print(file_name)
+			file_name = os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{self.p.seed}_buildings_{self.p.buildings}_distributionCS_{self.p.distributionCS}_densityCars_{self.p.densityCars}_densityEV_{self.p.densityEV}_densityDiesel_{self.p.densityDiesel}_windV_{self.p.windV}_pollutionRouting_{self.p.pollutionRouting}.npz')
+			print("\t\t-Error: in data structure of A*")
+			print(f"\t\t\t--{t}-",file_name)
+			print(f"\t\t\t--{t}-",cell.x, " - ", cell.y)
 		dis2,_,_=self.localizeCS(self.target,t)
 		if self.moves<dis+dis2:
 			self.state=CarState.ToCharging
@@ -2839,7 +2841,7 @@ def cartesianExperiment():
 	p=Parameters()
 	ps=p.metaExperiment(
 		#energy=[0.15,0.3,0.45,0.6,0.75,0.9],
-		seed=[12,34,56,78],#,90],
+		seed=[12,34,78,90],#56]
 		buildings=[True,False],
 		distributionCS=[0,1,2],
 		#numberChargersPerBlock=[1,5,10],#cambiar por las 3 config
@@ -2936,6 +2938,7 @@ def experiment(i, run_all=True,view=False,cache=False,indiv=None, returnFits = F
 		#stats=Stats(p)
 		#stats.plotCS(False)
 		#stats.plot(False)
+	# return True
 
 SimulationResult = namedtuple('SimulationResult', ['global_fit', 'local_fit'])
 
@@ -2965,35 +2968,6 @@ def initialize_individual(valid_coordinates, num_chargers, distance, lim_distanc
 	stations = [GChargingStation(some_coordinates[k], chargers_per_station[k]) for k in range(M) if chargers_per_station[k]>0]
 	return Individual(stations)
 
-
-# if __name__ == '__main__':
-# 	# list of all experiments
-# 	ps = cartesianExperiment()
-# 	for (i,p) in enumerate(ps):
-# 		print(i,p.legendName)
-
-# 	# view an particular experiment
-# 	experiment(406)
-
-# 	# execute in background all experiments
-# 	start_time = time.time()  
-# 	num_processors = multiprocessing.cpu_count()
-
-# 	ps2=[]
-# 	for i in range(0,len(ps),50):
-# 		ps2.append(ps[i:i+50])
-
-# 	for i,ps in enumerate(ps2):
-# 		with multiprocessing.Pool(num_processors) as pool:
-# 			pool.map(experiment, range(len(ps)))
-# 		print(f'Finished {i+1}/{len(ps2)}')
-		
-# 	end_time = time.time()  
-# 	duration = end_time - start_time 
-# 	print(f'Total time: {duration:.2f} seconds')
-
-# 	# generate the metastats
-# 	ms=MetaStats()
 		
 class GChargingStation:
 	def __init__(self, coordinates: Tuple[int, int], num_chargers: int):
@@ -3526,6 +3500,9 @@ if __name__ == '__main__':
 	parser.add_argument('--timeout', type=int, help='Timeout to execute a pool of process', default=0)
 	parser.add_argument('--p', type=int, help='CPUs to use', default=0)
 	parser.add_argument('--batch-size', type=int, help='batch size multiplier, default 1 which is equal to the number of processes', default=1)
+	parser.add_argument('--data-save-dir', type=str, help='Dir where save the output data', default='simulationData')
+	parser.add_argument('--newData', action='store_true', help='Repeat the experiments with a clear run', default=False)
+	
 	#parser.add_argument()
 
 	# 44
@@ -3569,6 +3546,8 @@ if __name__ == '__main__':
 
 
 		if args.all:
+			import sys
+			print("Python version: ", sys.version)
 			start_time = time.time()
 			numberExperiments = len(ps)
 			#print('Hay ', numberExperiments, ' experimentos.')
@@ -3577,14 +3556,33 @@ if __name__ == '__main__':
 				num_processors = multiprocessing.cpu_count()-1
 			else:
 				num_processors = args.p
-
+			print(f"Inicio de experimento el día y horas: {datetime.datetime.fromtimestamp(time.time()).strftime('%d-%m-%Y %H:%M:%S')}")
 			print('Se van a usar un total de ', num_processors, 'cores.')
+			
 
-			timeout = args.timeout
+			global dataSaveDir
+			dataSaveDir = args.data_save_dir
+			idx = 0
+			if not os.path.exists(dataSaveDir):
+				os.mkdir(dataSaveDir)
+				print(f"Se ha creado el directorio {dataSaveDir}")
+			while os.path.exists(dataSaveDir) and args.newData:
+				_dataSaveDir = dataSaveDir+str(idx)
+				if not os.path.exists(_dataSaveDir):
+					dataSaveDir = _dataSaveDir
+					os.mkdir(dataSaveDir)
+					print(f"Se ha generado la carpeta {dataSaveDir}.")
 
-			path_experiments = lambda p: os.path.join("simulationData", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
+					break
+				idx += 1
+
+			print(f"Se van a almacenar los datos en {dataSaveDir}")
+
+			timeout = args.timeout #* args.batch_size habría que hacer esto? el batch es el doble de grande es ciert, y la pool tendrá que hacer más trabajo con el mismo tiempo, pero como irá en bloques no debería de afectarle 
+
+			path_experiments = lambda pm: os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{pm.seed}_buildings_{pm.buildings}_distributionCS_{pm.distributionCS}_densityCars_{pm.densityCars}_densityEV_{pm.densityEV}_densityDiesel_{pm.densityDiesel}_windV_{pm.windV}_pollutionRouting_{pm.pollutionRouting}.npz')
 			 #os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
-			bool_experiments = lambda p: p.densityCars <= 0.25 and (not p.buildings or p.pollutionRouting)
+			bool_experiments = lambda pm: not pm.pollutionRouting# pm.densityCars <= 0.25 and (not pm.buildings and)
 			
 
 			experiments_to_run = []
@@ -3592,7 +3590,7 @@ if __name__ == '__main__':
 			for i in range(numberExperiments):
 				p = ps[i]
 				file_name = path_experiments(p)
-				if bool_experiments(p):
+				if bool_experiments(p) and not os.path.exists(file_name):
 					experiments_to_run.append(i)
 			print('Number of experiments: ', len(experiments_to_run))
 
@@ -3608,24 +3606,34 @@ if __name__ == '__main__':
 
 			# Función que desemvuelve los argumentos pasados como entrada para que pueda leerlos la función
 			def worker_wrapper(args):
-				# Desempaquetamos los argumentos y pasamos únicamente el idExperimento
-				i, queue = args
-				experiment(i)
-				# Solo se añadiran aquellos idExperimentos que hayan acabado la ejecución
-				queue.put(i)	
+				# finished = False
+				try:
+					# Desempaquetamos los argumentos y pasamos únicamente el idExperimento
+					i, queue = args
+					# finished = experiment(i)
+					experiment(i)
+					# assert finished, "Error: no se ha acabado el experimento por algún fallo interno."
+					# Solo se añadiran aquellos idExperimentos que hayan acabado la ejecución
+					queue.put(i)	# Como es un envoltorio si da error sigue saliendo, tendré que hacer un try: except o algo así.
+				except Exception as e:
+					print("\tError in: ", i, ";\n\t\t-", e, "\n\t\tName exp: ", cartesianExperiment()[i])
 
 			print("Númeor de batchs totales: ", len(ps2))
-			with multiprocessing.Manager as manager:
-				experiments_finished_queue = manager.SimpleQueue()
-				experiments_finished_set = set()
+			
+			if timeout == 0:
+				print("No se va a hacer uso de timeout")
+			else:
+				print("Se va a utilizar un timeout de: ", timeout, 'segundos.')
 
-				if timeout == 0:
-					print("No se va a hacer uso de timeout")
-				else:
-					print("Se va a utilizar un timeout de: ", timeout, 'segundos.')
+			experiments_finished_set = set()
+			for i, _ in enumerate(ps2):
+					
+				print(f"{transform_time(time.time())} - Iniciando el batch {i}/{len(ps2)}:")
+				with multiprocessing.Manager() as manager:
 
-				for i, _ in enumerate(ps2):
-					print(f"{transform_time(time.time())} - Iniciando el batch {i}/{len(ps2)}:")
+					experiments_finished_queue = manager.Queue()
+					
+					start_time2 = time.time()
 					with multiprocessing.Pool(num_processors) as pool:
 
 						# creamos los batchs pero añadiendo la Queue que controlará aquellos experimentos que finalicen
@@ -3643,33 +3651,38 @@ if __name__ == '__main__':
 							async_results.wait(timeout=timeout) # Lanzamos la función con timeout
 							if async_results.ready():
 								print("\tTodos los experimentos se han finalizado en tiempo, todos de forma correcta: ", async_results.successful())
+								pool.close()
+								pool.join()
 							else:
+								pool.terminate()
+								pool.join()
 								print("\tNo se han finalizado todos los experimentos en tiempo.")
 							
-							while not experiments_finished_queue.empth():
+							_experiments_finished_set = set()
+							while not experiments_finished_queue.empty():
 								# Añadimos los experimentos finalizados a un conjunto
-								experiments_finished_set.add(experiments_finished_queue.get())
+								experiment_finished = experiments_finished_queue.get()
+								_experiments_finished_set.add(experiment_finished)
+								experiments_finished_set.add(experiment_finished)
+
+							_experiments_not_finished = [id_experiment for id_experiment in ps2[i] if id_experiment not in _experiments_finished_set]
+							print(f"\tEl número de experimentos no finalizados son: {len(_experiments_not_finished)}/{batchSize};\n\t\t y son: {_experiments_not_finished}")
 					
 
-						# Forzamos la liberación de memoria
-						pool.close()
-						pool.join()
-						del pool
-						gc.collect()  # Forzamos la recolección de basura
 						print(f'\t- Finished {i+1}/{len(ps2)} -')
-						print("\t- ",(time.time()-start_time)/3600, 'hours -')
-				experiments_finished_queue.close()
-				print("--Queue finalizada y cerrada--")
+						print("\t- ",(time.time()-start_time2)/60, 'minutes -')
+						
+					# Forzamos la liberación de memoria
+					del pool
+					gc.collect()  # Forzamos la recolección de basura
+					print("\t--Queue finalizada y cerrada--")
 			
-			experiments_not_finished = [id_experiment for id_experiment in ps if id_experiment not in experiments_finished_set]
-			print(f"Los siguientes experimentos no han sido finalizados: {experiments_not_finished}")
-			'''
-			with multiprocessing.Pool(num_processors-1) as pool:
-				pool.map(experiment, experiments_to_run[:30])#range(len(ps)))
-			'''
+			experiments_not_finished = [id_experiment for id_experiment in ps2[i] if id_experiment not in experiments_finished_set]
+			print(f"Los siguientes experimentos ({len(experiments_not_finished)}) no han sido finalizados: {experiments_not_finished}")
+			
 			end_time = time.time()
 			duration = end_time - start_time
-			print(f'Total time: {duration:.2f} seconds')
+			print(f'Total time: {duration/3600:.2f} hours')
 
 		if args.stats:
 			ms = MetaStats()
