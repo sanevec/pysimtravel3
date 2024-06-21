@@ -101,6 +101,8 @@ class Parameters:
 		#self.statsFileName="data/stats_" # paper1
 		self.statsFileName="paper2/stats_" 
 		self.metastatsFileName="paper2/metastats/"
+		self.dataSave="simulationData"
+
 
 	def clone(self):
 		"""
@@ -984,13 +986,13 @@ class City:
 					break
 			del P
 			del G
-			np.savez_compressed(os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
+			np.savez_compressed(os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
 			del savedP
-			np.savez_compressed(os.path.join("simulationData32", f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
+			np.savez_compressed(os.path.join(dataSaveDir, f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
 			del savedG
-			np.savez_compressed(os.path.join("simulationData32", f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+			np.savez_compressed(os.path.join(dataSaveDir, f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
 			del averages
-			np.savez_compressed(os.path.join("simulationData32", f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
+			np.savez_compressed(os.path.join(dataSaveDir, f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
 			del map_cars
 			gc.collect()
 
@@ -1363,8 +1365,8 @@ class City:
 					flattened_G[f"{key1}_{key2}"] = array[:,:,saved_times].astype(np.float32)
 					averages[f"G_{key1}_{key2}"] = np.mean(array[:, :, times//4:], axis=2).astype(np.float32)
 
-			np.savez_compressed(os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_P)
-			np.savez_compressed(os.path.join("simulationData32", f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_G)
+			np.savez_compressed(os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_P)
+			np.savez_compressed(os.path.join(dataSaveDir, f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_G)
 			#p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting
 			#np.savez_compressed(f'G_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **flattened_G)
 			
@@ -1393,9 +1395,9 @@ class City:
 					flattened_map_cars[f"{key1}_{key2}"] = array[:,:,saved_times].astype(np.float32)
 					averages[f"cars_{key1}_{key2}"] = np.mean(array[:,:,times//4:], axis=2).astype(np.float32)		
 
-			np.savez_compressed(os.path.join("simulationData32", f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_map_cars)
+			np.savez_compressed(os.path.join(dataSaveDir, f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **flattened_map_cars)
 			#np.savez_compressed(f'cars_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **flattened_map_cars)#p.seed,p.buildings,p.distributionCS,p.densityCars,p.densityEV,p.densityDiesel,p.windV,p.pollutionRouting
-			np.savez_compressed(os.path.join("simulationData32", f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+			np.savez_compressed(os.path.join(dataSaveDir, f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
 			#np.savez_compressed(f'averages_delta_{delta}_gamma_{gamma}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz', **averages)
 			del flattened_map_cars
 			del averages
@@ -1975,8 +1977,9 @@ class Car:
 		if len(ire)==0:
 			p=self.p
 			file_name = f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz'
-			print("Error: in data structure of A*")
-			print(file_name)
+			print("\t\t-Error: in data structure of A*")
+			print(f"\t\t\t--{t}-",file_name)
+			print(f"\t\t\t--{t}-",cell.x, " - ", cell.y)
 			print(p.id)
 		dis2,_,_=self.localizeCS(self.target,t)
 		if self.moves<dis+dis2:
@@ -2455,7 +2458,7 @@ class Car:
 
 			#HACKED
 			if best==None:
-				file_name = os.path.join("simulationData32", f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
+				file_name = os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{p.seed}_buildings_{p.buildings}_distributionCS_{p.distributionCS}_densityCars_{p.densityCars}_densityEV_{p.densityEV}_densityDiesel_{p.densityDiesel}_windV_{p.windV}_pollutionRouting_{p.pollutionRouting}.npz')
 				print('Here is the error: ', file_name)
 
 			if best.cell==target:
@@ -3540,6 +3543,9 @@ if __name__ == '__main__':
 	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments', default=default_values['contamination'])
 	parser.add_argument('--timeout', type=int, help='Timeout to execute a pool of process', default=default_values['timeout'])
 	parser.add_argument('--processes', type=int, help='CPUs to use', default=default_values['processes'])
+	parser.add_argument('--batch-size', type=int, help='batch size multiplier, default 1 which is equal to the number of processes', default=1)
+	parser.add_argument('--data-save-dir', type=str, help='Dir where save the output data', default='simulationData32')
+	parser.add_argument('--newData', action='store_true', help='Repeat the experiments with a clear run', default=False)
 	#parser.add_argument()
 
 	# 44
@@ -3583,6 +3589,8 @@ if __name__ == '__main__':
 
 
 		if args.all:
+			import sys
+			print("Python version: ", sys.version)
 			start_time = time.time()
 			numberExperiments = len(ps)
 			#print('Hay ', numberExperiments, ' experimentos.')
@@ -3590,7 +3598,17 @@ if __name__ == '__main__':
 			if args.processes == 0:
 				num_processors = multiprocessing.cpu_count()-1
 			else:
-				num_processors = args.p
+				num_processors = args.processes
+
+			print(f"Inicio de experimento el día y horas: {datetime.datetime.fromtimestamp(time.time()).strftime('%d-%m-%Y %H:%M:%S')}")
+			print('Se van a usar un total de ', num_processors, 'cores.')
+			global dataSaveDir
+			dataSaveDir = args.data_save_dir
+			idx = 0
+			if not os.path.exists(dataSaveDir):
+				os.mkdir(dataSaveDir)
+				print(f"Se ha creado el directorio {dataSaveDir}")
+			
 			def transform_time(t):
 				return datetime.datetime.fromtimestamp(t).strftime("%H:%M:%S")
 			timeout = args.timeout
@@ -3674,7 +3692,7 @@ if __name__ == '__main__':
 			
 			end_time = time.time()
 			duration = end_time - start_time
-			#print(f'Total time: {duration:.2f} seconds')
+			print(f'Total time: {duration/3600:.2f} hours')
 
 		if args.stats:
 			ms = MetaStats()
