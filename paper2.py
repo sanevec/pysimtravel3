@@ -101,7 +101,7 @@ class Parameters:
 		#self.statsFileName="data/stats_" # paper1
 		self.statsFileName="paper2/stats_" 
 		self.metastatsFileName="paper2/metastats/"
-		self.dataSave="simulatioData"
+		self.dataSave="simulationData"
 
 
 	def clone(self):
