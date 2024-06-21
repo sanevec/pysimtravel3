@@ -1973,7 +1973,10 @@ class Car:
 			file_name = os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{2000}_seed_{self.p.seed}_buildings_{self.p.buildings}_distributionCS_{self.p.distributionCS}_densityCars_{self.p.densityCars}_densityEV_{self.p.densityEV}_densityDiesel_{self.p.densityDiesel}_windV_{self.p.windV}_pollutionRouting_{self.p.pollutionRouting}.npz')
 			print("\t\t-Error: in data structure of A*")
 			print(f"\t\t\t--{t}-",file_name)
-			print(f"\t\t\t--{t}-",cell.x, " - ", cell.y)
+			print(f"\t\t\t\t--", self.target, self.toCell)
+			print(f"\t\t\t\t--", cell, "-" ,cell.x, "-", cell.y, " // ", cell.cs, "-", cell.state, "-", cell.h2cs)
+			print(f"\t\t\t\t--", self.cell, "-", self.cell.x, "-", self.cell.y, " // ", self.cell.cs, "-", self.cell.state, "-", self.cell.h2cs)
+
 		dis2,_,_=self.localizeCS(self.target,t)
 		if self.moves<dis+dis2:
 			self.state=CarState.ToCharging
@@ -2841,7 +2844,7 @@ def cartesianExperiment():
 	p=Parameters()
 	ps=p.metaExperiment(
 		#energy=[0.15,0.3,0.45,0.6,0.75,0.9],
-		seed=[12,34,78,90],#56]
+		seed=[1,12,34,78,],#56, 90]
 		buildings=[True,False],
 		distributionCS=[0,1,2],
 		#numberChargersPerBlock=[1,5,10],#cambiar por las 3 config
@@ -3502,6 +3505,7 @@ if __name__ == '__main__':
 	parser.add_argument('--batch-size', type=int, help='batch size multiplier, default 1 which is equal to the number of processes', default=1)
 	parser.add_argument('--data-save-dir', type=str, help='Dir where save the output data', default='simulationData')
 	parser.add_argument('--newData', action='store_true', help='Repeat the experiments with a clear run', default=False)
+	parser.add_argument('--use-batch', action='store_true', help='Use multiprocessing with te dataExp in batches, slower if you use this, but allow debug eficiently.', default=False)
 	
 	#parser.add_argument()
 
@@ -3594,12 +3598,7 @@ if __name__ == '__main__':
 					experiments_to_run.append(i)
 			print('Number of experiments: ', len(experiments_to_run))
 
-			ps2 = []
-			assert args.batch_size > 0, "Error, el argumento de entrada batch-size tiene que ser mayor a 1"
-			batchSize = num_processors * args.batch_size#//2
-
-			for i in range(0, len(experiments_to_run), batchSize):
-				ps2.append(experiments_to_run[i:i+batchSize])
+			
 			
 			def transform_time(t):
 				return datetime.datetime.fromtimestamp(t).strftime("%H:%M:%S")
@@ -3617,68 +3616,82 @@ if __name__ == '__main__':
 					queue.put(i)	# Como es un envoltorio si da error sigue saliendo, tendré que hacer un try: except o algo así.
 				except Exception as e:
 					print("\tError in: ", i, ";\n\t\t-", e, "\n\t\tName exp: ", cartesianExperiment()[i])
-
-			print("Númeor de batchs totales: ", len(ps2))
 			
-			if timeout == 0:
-				print("No se va a hacer uso de timeout")
-			else:
-				print("Se va a utilizar un timeout de: ", timeout, 'segundos.')
 
 			experiments_finished_set = set()
-			for i, _ in enumerate(ps2):
-					
-				print(f"{transform_time(time.time())} - Iniciando el batch {i}/{len(ps2)}:")
-				with multiprocessing.Manager() as manager:
+			use_batch = args.use_batch
+			if not use_batch:
+				print(transform_time(time.time()),"- Iniciando pool sin batches")
+				with multiprocessing.Pool() as pool:
+					startT = time.time()
+					pool.map(experiment, experiments_to_run)
+			
+			else:
+				ps2 = []
+				assert args.batch_size > 0, "Error, el argumento de entrada batch-size tiene que ser mayor a 1"
+				batchSize = num_processors * args.batch_size#//2
 
-					experiments_finished_queue = manager.Queue()
-					
-					start_time2 = time.time()
-					with multiprocessing.Pool(num_processors) as pool:
+				for i in range(0, len(experiments_to_run), batchSize):
+					ps2.append(experiments_to_run[i:i+batchSize])
+				print("Númeor de batchs totales: ", len(ps2))
+				if timeout == 0:
+					print("No se va a hacer uso de timeout")
+				else:
+					print("Se va a utilizar un timeout de: ", timeout, 'segundos.')
 
-						# creamos los batchs pero añadiendo la Queue que controlará aquellos experimentos que finalicen
-						batch_with_queue = [(id_experiment, experiments_finished_queue) for id_experiment in ps2[i]]
+				for i, _ in enumerate(ps2):
+						
+					print(f"{transform_time(time.time())} - Iniciando el batch {i}/{len(ps2)}:")
+					with multiprocessing.Manager() as manager:
 
-						# Ejecutamos la pool de forma asíncrona, accediendo primero a la función intermedia para desenvolver y controlar los resultados
-						async_results = pool.map_async(worker_wrapper, batch_with_queue)
+						experiments_finished_queue = manager.Queue()
+						
+						start_time2 = time.time()
+						with multiprocessing.Pool(num_processors) as pool:
 
-						if timeout == 0:
-							async_results.get()
-							print("Pool finalizada")
-							pool.close()
-							pool.join()
-						else:
-							async_results.wait(timeout=timeout) # Lanzamos la función con timeout
-							if async_results.ready():
-								print("\tTodos los experimentos se han finalizado en tiempo, todos de forma correcta: ", async_results.successful())
+							# creamos los batchs pero añadiendo la Queue que controlará aquellos experimentos que finalicen
+							batch_with_queue = [(id_experiment, experiments_finished_queue) for id_experiment in ps2[i]]
+
+							# Ejecutamos la pool de forma asíncrona, accediendo primero a la función intermedia para desenvolver y controlar los resultados
+							async_results = pool.map_async(worker_wrapper, batch_with_queue)
+
+							if timeout == 0:
+								async_results.get()
+								print("Pool finalizada")
 								pool.close()
 								pool.join()
 							else:
-								pool.terminate()
-								pool.join()
-								print("\tNo se han finalizado todos los experimentos en tiempo.")
-							
-							_experiments_finished_set = set()
-							while not experiments_finished_queue.empty():
-								# Añadimos los experimentos finalizados a un conjunto
-								experiment_finished = experiments_finished_queue.get()
-								_experiments_finished_set.add(experiment_finished)
-								experiments_finished_set.add(experiment_finished)
+								async_results.wait(timeout=timeout) # Lanzamos la función con timeout
+								if async_results.ready():
+									print("\tTodos los experimentos se han finalizado en tiempo, todos de forma correcta: ", async_results.successful())
+									pool.close()
+									pool.join()
+								else:
+									pool.terminate()
+									pool.join()
+									print("\tNo se han finalizado todos los experimentos en tiempo.")
+								
+								_experiments_finished_set = set()
+								while not experiments_finished_queue.empty():
+									# Añadimos los experimentos finalizados a un conjunto
+									experiment_finished = experiments_finished_queue.get()
+									_experiments_finished_set.add(experiment_finished)
+									experiments_finished_set.add(experiment_finished)
 
-							_experiments_not_finished = [id_experiment for id_experiment in ps2[i] if id_experiment not in _experiments_finished_set]
-							print(f"\tEl número de experimentos no finalizados son: {len(_experiments_not_finished)}/{batchSize};\n\t\t y son: {_experiments_not_finished}")
-					
-
-						print(f'\t- Finished {i+1}/{len(ps2)} -')
-						print("\t- ",(time.time()-start_time2)/60, 'minutes -')
+								_experiments_not_finished = [id_experiment for id_experiment in ps2[i] if id_experiment not in _experiments_finished_set]
+								print(f"\tEl número de experimentos no finalizados son: {len(_experiments_not_finished)}/{batchSize};\n\t\t y son: {_experiments_not_finished}")
 						
-					# Forzamos la liberación de memoria
-					del pool
-					gc.collect()  # Forzamos la recolección de basura
-					print("\t--Queue finalizada y cerrada--")
+
+							print(f'\t- Finished {i+1}/{len(ps2)} -')
+							print("\t- ",(time.time()-start_time2)/60, 'minutes -')
+							
+						# Forzamos la liberación de memoria
+						del pool
+						gc.collect()  # Forzamos la recolección de basura
+						print("\t--Queue finalizada y cerrada--")
 			
-			experiments_not_finished = [id_experiment for id_experiment in ps2[i] if id_experiment not in experiments_finished_set]
-			print(f"Los siguientes experimentos ({len(experiments_not_finished)}) no han sido finalizados: {experiments_not_finished}")
+				experiments_not_finished = [id_experiment for id_experiment in ps2[i] if id_experiment not in experiments_finished_set]
+				print(f"Los siguientes experimentos ({len(experiments_not_finished)}) no han sido finalizados: {experiments_not_finished}")
 			
 			end_time = time.time()
 			duration = end_time - start_time
