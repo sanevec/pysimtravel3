@@ -915,6 +915,9 @@ class City:
 					if i>0:
 						next(self.city_generator)
 					if returnFits or contaminationExp:
+						for k in range(num_cs):
+							current_cs = self.grid.cs[k]
+							loc_fits[k] += -(len([1 for car in current_cs.car if car!=None])-len(current_cs.queue))/current_cs.numPlugins
 						for cartype in positions:
 							if n>=0:
 								averages[f"cars_{cartype}_positions"]*=n/(n+1)
@@ -980,22 +983,29 @@ class City:
 								averages[f"G_{key}"] = n/(n+1) * averages[f"G_{key}"] + 1/(n+1) * G[key]								
 							#P[key][1:-1, 1:-1] = (1-gamma) * acc * (wind[0]*P[key][1:-1, 2:] + wind[1]*P[key][1:-1, :-2] + wind[2]*P[key][:-2, 1:-1] + wind[3]*P[key][2:, 1:-1] + wind[4]*P[key][:-2, 2:] + wind[5]*P[key][2:, 2:] + wind[6]*P[key][:-2, :-2] + wind[7]*P[key][2:, :-2] + wind[8]*P[key][1:-1, 1:-1] + G[key][:, :])
 							P[key][1:-1, 1:-1] = (1-gamma) * acc * (wind[0]*aux[1:-1, 2:] + wind[1]*aux[1:-1, :-2] + wind[2]*aux[:-2, 1:-1] + wind[3]*aux[2:, 1:-1] + wind[4]*aux[:-2, 2:] + wind[5]*aux[2:, 2:] + wind[6]*aux[:-2, :-2] + wind[7]*aux[2:, :-2] + wind[8]*aux[1:-1, 1:-1] + G[key][:, :])
+						if returnFits or contaminationExp:
+							carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
 
 				except StopIteration:
 					#print("\ncity_generator has no more items to generate.")
 					break
-			del P
-			del G
-			np.savez_compressed(os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
-			del savedP
-			np.savez_compressed(os.path.join(dataSaveDir, f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
-			del savedG
-			np.savez_compressed(os.path.join(dataSaveDir, f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
-			del averages
-			np.savez_compressed(os.path.join(dataSaveDir, f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
-			del map_cars
-			gc.collect()
-
+			if contaminationExp and not returnFits:
+				del P
+				del G
+				np.savez_compressed(os.path.join(dataSaveDir, f'P_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedP)
+				del savedP
+				np.savez_compressed(os.path.join(dataSaveDir, f'G_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **savedG)
+				del savedG
+				np.savez_compressed(os.path.join(dataSaveDir, f'A_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **averages)
+				del averages
+				np.savez_compressed(os.path.join(dataSaveDir, f'C_delta_{0.1}_gamma_{0.01}_times_{times}_seed_{names[0]}_buildings_{names[1]}_distributionCS_{names[2]}_densityCars_{names[3]}_densityEV_{names[4]}_densityDiesel_{names[5]}_windV_{names[6]}_pollutionRouting_{names[7]}.npz'), **map_cars)
+				del map_cars
+				gc.collect()
+			if returnFits:
+				Psum = averages["P_1_CO2"]+averages["P_2_CO2"]
+				new_acc = np.ones((width+2, height+2))
+				new_acc[1:-1,1:-1] = acc
+				return -carsAtDestination/times*Psum[new_acc==1,:].mean()+Psum[new_acc==1,:].std(), loc_fits
 
 		else:
 			initial_time = time.time()
@@ -1139,6 +1149,8 @@ class City:
 				if returnFits or contaminationExp:
 						carsAtDestination += len([car for car in self.cars if car.state == CarState.Destination])
 						#print(carsAtDestination, '\n')
+
+
 			#plt.plot(range(len(aux)),aux)
 			#plt.show()
 			if (returnFits or contaminationExp) and False:
@@ -3035,10 +3047,10 @@ class Individual:
 class Genetic:
 	def __init__(self,numExperiment, simulation_cache={}) -> None:
 		self.numExperiment = numExperiment
-		self.population_size = multiprocessing.cpu_count()
+		self.population_size = multiprocessing.cpu_count()-1
 		#self.max_num_stations = 5
-		self.num_chargers = 45
-		self.num_timesteps = 500
+		self.num_chargers = 72
+		self.num_timesteps = 2000
 		#self.distance = lambda x,y : np.sqrt((x[0]-y[0])**2+(x[1]-y[1])**2)
 		self.lim_distance = 10
 		self.num_generations: int = 1000
