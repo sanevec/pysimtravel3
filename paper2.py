@@ -3066,9 +3066,9 @@ class Genetic:
 		self.distance = lambda x,y: self.aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
 		self.valid_coordinates = city1.listgenerator
 		(n_rows, n_cols) = city1.sizes
-		self.delta = 0.2  # Diffusion parameter
+		self.delta = np.float32(0.2)  # Diffusion parameter
 		self.corner_factor = 1#/np.sqrt(2)
-		self.gamma = 0.1 # Lost to the atmosphere
+		self.gamma = np.float32(0.1) # Lost to the atmosphere
 		acc = np.zeros((n_rows+2, n_cols+2))
 		for x,y in self.valid_coordinates:
 			acc[x,y] = 1
@@ -3085,33 +3085,34 @@ class Genetic:
 			acc[2:, 0:-2] + acc[0:-2, 2:]
 		)
 		dif_matrix = (1 - (acc_neig_edge + acc_neig_corner * self.corner_factor) * self.delta / (4 + 4 * self.corner_factor))
+		
 		self.acc = acc[1:-1, 1:-1]
 		self.dif_matrix = dif_matrix
-		WN = 0.8 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
-		WE = 0 * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
-		sign_WN = np.sign(WN).astype(int)
-		sign_WE = np.sign(WE).astype(int)
-		displ_N = np.zeros_like(WN)
-		displ_S = np.zeros_like(WN)
-		displ_E = np.zeros_like(WN)
-		displ_W = np.zeros_like(WN)
-		displ_NW = np.zeros_like(WN)
-		displ_NE = np.zeros_like(WN)
-		displ_SW = np.zeros_like(WN)
-		displ_SE = np.zeros_like(WN)
-		stays = np.ones_like(WN)
+		self.WN = 0# * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		self.WE = 0.1# * np.ones((n_rows+2, n_cols+2, self.num_timesteps+1))
+		sign_WN = np.sign(self.WN).astype(int)
+		sign_WE = np.sign(self.WE).astype(int)
+		displ_N = np.zeros((n_rows+2, n_cols+2))#np.zeros_like(self.WN)
+		displ_S = np.zeros_like(displ_N)
+		displ_E = np.zeros_like(displ_N)
+		displ_W = np.zeros_like(displ_N)
+		displ_NW = np.zeros_like(displ_N)
+		displ_NE = np.zeros_like(displ_N)
+		displ_SW = np.zeros_like(displ_N)
+		displ_SE = np.zeros_like(displ_N)
+		stays = np.ones_like(displ_N)
 		for p in range(1, n_rows+1):
 			for q in range(1, n_cols+1):
-					displ_N[p,q, :] = acc[p,q] * np.maximum(WN[p, q,:], 0) * (1 - acc[p + sign_WE[p,q,:], q - 1] * abs(WE[p, q, :])) * acc[p, q - 1]
-					displ_S[p,q, :] = acc[p,q] * np.maximum(-WN[p, q,:],0) * (1 - acc[p + sign_WE[p,q,:], q + 1] * abs(WE[p, q, :])) * acc[p, q + 1]
-					displ_E[p,q, :] = acc[p,q] * np.maximum(WE[p, q,:], 0) * (1 - acc[p + 1, q - sign_WN[p,q,:]] * abs(WN[p, q, :])) * acc[p + 1, q]
-					displ_W[p,q, :] = acc[p,q] * np.maximum(-WE[p, q,:],0) * (1 - acc[p - 1, q - sign_WN[p,q,:]] * abs(WN[p, q, :])) * acc[p - 1, q]
-					displ_NE[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(WE[p, q,:], 0) * acc[p + 1, q - 1]
-					displ_NW[p,q,:] = acc[p,q] * np.maximum(WN[p, q,:], 0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q - 1]
-					displ_SE[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(WE[p, q,:], 0) * acc[p + 1, q + 1]
-					displ_SW[p,q,:] = acc[p,q] * np.maximum(-WN[p, q,:],0) * np.maximum(-WE[p, q,:],0) * acc[p - 1, q + 1]
+					displ_N[p,q] = acc[p,q] * np.maximum(self.WN, 0) * (1 - np.maximum(acc[p + sign_WE, q - 1], acc[p + sign_WE, q]) * abs(self.WE)) * acc[p, q - 1]
+					displ_S[p,q] = acc[p,q] * np.maximum(-self.WN,0) * (1 - np.maximum(acc[p + sign_WE, q + 1], acc[p + sign_WE, q]) * abs(self.WE)) * acc[p, q + 1]
+					displ_E[p,q] = acc[p,q] * np.maximum(self.WE, 0) * (1 - np.maximum(acc[p + 1, q - sign_WN], acc[p, q - sign_WN]) * abs(self.WN)) * acc[p + 1, q]
+					displ_W[p,q] = acc[p,q] * np.maximum(-self.WE,0) * (1 - np.maximum(acc[p - 1, q - sign_WN], acc[p, q - sign_WN]) * abs(self.WN)) * acc[p - 1, q]
+					displ_NE[p,q] = acc[p,q] * np.maximum(self.WN, 0) * np.maximum(self.WE, 0) * acc[p + 1, q - 1]
+					displ_NW[p,q] = acc[p,q] * np.maximum(self.WN, 0) * np.maximum(-self.WE,0) * acc[p - 1, q - 1]
+					displ_SE[p,q] = acc[p,q] * np.maximum(-self.WN,0) * np.maximum(self.WE, 0) * acc[p + 1, q + 1]
+					displ_SW[p,q] = acc[p,q] * np.maximum(-self.WN,0) * np.maximum(-self.WE,0) * acc[p - 1, q + 1]
 		stays += -(displ_N + displ_S + displ_E + displ_W + displ_NE + displ_NW + displ_SE + displ_SW)
-		self.wind = (displ_N[1:-1, 2:, :], displ_S[1:-1, :-2, :], displ_E[:-2, 1:-1, :], displ_W[2:, 1:-1, :], displ_NE[:-2, 2:, :], displ_NW[2:, 2:, :], displ_SE[:-2, :-2, :], displ_SW[2:, :-2, :], stays[1:-1, 1:-1, :])
+		self.wind = (displ_N[1:-1, 2:], displ_S[1:-1, :-2], displ_E[:-2, 1:-1], displ_W[2:, 1:-1], displ_NE[:-2, 2:], displ_NW[2:, 2:], displ_SE[:-2, :-2], displ_SW[2:, :-2], stays[1:-1, 1:-1])
 		self.simulation_cache = simulation_cache  # Diccionario para almacenar los resultados de las simulaciones
 		#if self.max_num_stations > self.num_chargers:
 		#    print("The number of CS cannot exceed the number of chargers.")
