@@ -2919,7 +2919,7 @@ def cartesianExperiment():
 			ps2.append(p)
 	return ps2
 
-def experiment(i,run_all=True,view=False,cache=False,indiv=None, returnFits = False, contaminationExp = False, numTimesteps = 2000, delta = 0.1, corner_factor = 1, gamma = 0.01, acc = None, dif_matrix = None, wind = None):
+def experiment(i, numSave=0,run_all=True,view=False,cache=False,indiv=None, cnnExpDataSave=None, returnFits = False, contaminationExp = False, numTimesteps = 2000, delta = 0.1, corner_factor = 1, gamma = 0.01, acc = None, dif_matrix = None, wind = None):
 	p=cartesianExperiment()[i]
 
 	for cartype in CAR_PROPERTIES:
@@ -2954,8 +2954,15 @@ def experiment(i,run_all=True,view=False,cache=False,indiv=None, returnFits = Fa
 		else:
 			city=City(p,indiv)
 			if returnFits:
+
+				if isinstance(cnnExpDataSave, str):
+					if not os.path.exists(cnnExpDataSave):
+						os.makedirs(cnnExpDataSave)
+					dataName = f"CNNExp_num-{numSave}_seed-{i}"
+					np.save(os.path.join(contaminationExp, dataName), city.grid)
+
 				global_fit, local_fit = city.runWithoutPlot(numTimesteps, returnFits, delta, corner_factor, gamma, acc, dif_matrix, wind)
-				return global_fit, local_fit
+				return global_fit, local_fit, dataName
 			elif contaminationExp:
 				city.runWithoutPlot(numTimesteps, returnFits, contaminationExp, delta, corner_factor, gamma, acc, dif_matrix, wind)
 			else:
@@ -2994,35 +3001,8 @@ def initialize_individual(valid_coordinates, num_chargers, distance, lim_distanc
 	stations = [GChargingStation(some_coordinates[k], chargers_per_station[k]) for k in range(M) if chargers_per_station[k]>0]
 	return Individual(stations)
 
-
-# if __name__ == '__main__':
-# 	# list of all experiments
-# 	ps = cartesianExperiment()
-# 	for (i,p) in enumerate(ps):
-# 		print(i,p.legendName)
-
-# 	# view an particular experiment
-# 	experiment(406)
-
-# 	# execute in background all experiments
-# 	start_time = time.time()  
-# 	num_processors = multiprocessing.cpu_count()
-
-# 	ps2=[]
-# 	for i in range(0,len(ps),50):
-# 		ps2.append(ps[i:i+50])
-
-# 	for i,ps in enumerate(ps2):
-# 		with multiprocessing.Pool(num_processors) as pool:
-# 			pool.map(experiment, range(len(ps)))
-# 		print(f'Finished {i+1}/{len(ps2)}')
-		
-# 	end_time = time.time()  
-# 	duration = end_time - start_time 
-# 	print(f'Total time: {duration:.2f} seconds')
-
-# 	# generate the metastats
-# 	ms=MetaStats()
+def generate_n_individual(experiment, numIndiv, valid_coordinates, num_charger, distance, lim_distance):
+	return [(experiment, i, initialize_individual(valid_coordinates=valid_coordinates, num_chargers=num_charger, distance=distance, lim_distance=lim_distance)) for i in range(numIndiv)]
 		
 class GChargingStation:
 	def __init__(self, coordinates: Tuple[int, int], num_chargers: int):
@@ -3540,12 +3520,84 @@ class ContaminationExperiment:
 		experiment(self.numExperiment,run_all=False,view=False,cache=False, indiv = self.individual, returnFits = False, contaminationExp = True, numTimesteps = self.num_timesteps, delta = self.delta, corner_factor = self.corner_factor, gamma = self.gamma, acc = self.acc, dif_matrix = self.dif_matrix, wind = self.wind)
 
 
+def wrappedGetDataCNN(idxIndv):
+	numExperiment, idxI, individual = idxIndv
+	return experiment(i=numExperiment, indiv=individual, cnnExpDataSave=idxI, returnFits=True, run_all=False, view=False) # Devuelve fit_globa, fit_local, name.
+	
+
+def getData2CNNExp(args, numExp = 30000, numProcessors = 0) -> None:
+	"""Función para obtener los datos de entranamiento de la CNN. 
+	Se realizará de forma paralela.
+
+	Args:
+		args (dict): argumentos de entrada del archivo
+		numExp (int): número de datos que se van a obtener.
+	"""
+	def aStarDistance(cell:Cell,target:Cell):
+		# Distance version
+		# only mark visited if it has more than one destination
+		visited=set()
+		visited.add(cell)
+		opened={}
+		for d in cell.destination:
+			if len(cell.destination)==1:
+				opened[d]=[]
+			else:
+				opened[d]=[d]
+		opened2={}
+		distancia=1
+
+		while True:
+			# solo se añaden los visited con mas de uno
+			for (o,r) in opened.items():
+				if len(o.destination)==1:
+					opened2[o.destination[0]]=r
+				else:
+					if o not in visited:
+						visited.add(o)
+						for d in o.destination:
+							r2=r.copy()
+							r2.append(d)
+							opened2[d]=r2
+				if o==target:
+					return (distancia,opened[o])
+			opened=opened2
+			opened2={}
+			distancia+=1
+
+	def getIndividuals(numIndiv, numExperiment):
+		num_chargers = 72
+		lim_distance = 10
+		p=cartesianExperiment()[numExperiment]
+		p.listgenerator=True
+		p.numberChargingPerStation=0
+		city1 = City(p)
+		g = city1.generator()
+		for k in g:
+			print(k)
+			break
+		distance = lambda x,y: aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
+		valid_coordinates = city1.listgenerator
+		return generate_n_individual(numExperiment, numIndiv, valid_coordinates=valid_coordinates, num_charger=num_chargers, distance=distance, lim_distance=lim_distance)
+
+	
+	numExperiment = args.run
+	processors = multiprocessing.cpu_count()-1 if numProcessors == 0 else numProcessors
+	inividuals = getIndividuals(numExp, numExperiment)
+
+	with multiprocessing.Pool(processors) as pool:
+		res = pool.map(wrappedGetDataCNN, inividuals) # fitG, fitL, name
+	
+	import pandas as pd
+	res2 = [[name, globalF+(sum(localF)/len(localF))] for globalF, localF, name in res]
+	return pd.DataFrame(res2, columns=['names', 'labels'])
+
 
 # Assuming the cartesianExperiment, experiment, and MetaStats functions are defined elsewhere
 
 if __name__ == '__main__':
 	# Set default values to None
-	default_values = {'list': None, 'view': None, 'run': None, 'all': True, 'stats': False,'contamination':False, 'genetic':False, 'timeout':7200, 'processes':0}
+	default_values = {'list': None, 'view': None, 'run': 1, 'all': False, 'stats': False,'contamination':False, 'genetic':False, 'cnnData':True, 'timeout':7200, 'processes':0}
 	parser = argparse.ArgumentParser(description='Selectively run experiments.')
 	parser.add_argument('--list', action='store_true', help='List all experiments', default=default_values['list'])
 	parser.add_argument('--view', type=int, help='View a specific experiment by index', default=default_values['view'])
@@ -3553,6 +3605,7 @@ if __name__ == '__main__':
 	parser.add_argument('--all', action='store_true', help='Run all experiments in the background', default=default_values['all'])
 	parser.add_argument('--stats', action='store_true', help='Generate meta statistics', default=default_values['stats'])
 	parser.add_argument('--genetic', action='store_true', help='Enable genetic algorithm option', default=default_values['genetic'])
+	parser.add_argument('--cnnData', action='store_true', help='Enable genetic algorithm option', default=default_values['cnnData'])
 	parser.add_argument('--contamination', action='store_true', help='Perform contamination experiments', default=default_values['contamination'])
 	parser.add_argument('--timeout', type=int, help='Timeout to execute a pool of process', default=default_values['timeout'])
 	parser.add_argument('--processes', type=int, help='CPUs to use', default=default_values['processes'])
@@ -3588,16 +3641,18 @@ if __name__ == '__main__':
 			experiment(args.view,True)
 
 		if args.run is not None:
-			if not (args.genetic or args.contamination):
-				experiment(args.run,True)#True)
-			elif args.genetic:
+			if args.genetic:
 				g=Genetic(args.run)
 				g.run()
-			else:
+			elif args.contamination:
 				#for gamma in [0.05, 0.1, 0.2]:#0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2]:#0.00, 0.01, 0.02, 0.03, 0.04,
 					g = ContaminationExperiment(numExperiment=args.run)
 				#	g.gamma=gamma
 					g.run()
+			elif args.cnnData:
+				getData2CNNExp(args=args)
+			else:
+				experiment(args.run,True)#True)
 
 
 
