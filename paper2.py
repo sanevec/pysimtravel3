@@ -3049,13 +3049,55 @@ class Genetic:
 		self.delta = np.float32(0.2)  # Diffusion parameter
 		self.corner_factor = 1#/np.sqrt(2)
 		self.gamma = np.float32(0.1) # Lost to the atmosphere
-		acc = np.zeros((n_rows+2, n_cols+2))
-		for x,y in self.valid_coordinates:
-			acc[x,y] = 1
-		acc[0,:]=1
-		acc[-1,:]=1
-		acc[:,0]=1
-		acc[:,-1]=1
+		self.buildings=True
+		if self.buildings:
+			acc = np.zeros((n_rows+2, n_cols+2))
+			for x,y in self.valid_coordinates:
+				acc[x,y] = 1
+
+			sidewalk = True
+			
+			if sidewalk:
+				acc[45:52,:]=1
+				acc[:,45:52]=1
+				acc[141:148,:]=1
+				acc[:,141:148]=1
+				acc[237:244,:]=1
+				acc[:,237:244]=1
+
+				l=list(range(0,10))+list(range(85,106))+list(range(181,202))+list(range(277,287))
+				for i in l:
+					for j in l:
+						acc[i+1,j+1]=1
+		
+
+			acc[0,:]=1
+			acc[-1,:]=1
+			acc[:,0]=1
+			acc[:,-1]=1
+
+			#acc[:,:]=1
+
+			#print(acc[50,146])
+			acc_neig_edge = (
+				acc[0:-2, 1:-1] + acc[2:, 1:-1] +
+				acc[1:-1, 0:-2] + acc[1:-1, 2:]
+			)
+			acc_neig_corner = (
+				acc[0:-2, 0:-2] + acc[2:, 2:] +
+				acc[2:, 0:-2] + acc[0:-2, 2:]
+			)
+
+			if sidewalk: #Aceras
+				for i in range(1,n_rows+1):
+					for j in range(1,n_cols+1):
+						if acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]:
+							if (i in range(2,n_rows) and j in range(2,n_cols)) or acc_neig_corner[i-1,j-1]+acc_neig_edge[i-1,j-1]>3:
+							#if 1<i<n_rows and 1<j<n_cols:
+								acc[i,j]=1
+		else:
+			acc = np.ones((n_rows+2, n_cols+2))
+
 		acc_neig_edge = (
 			acc[0:-2, 1:-1] + acc[2:, 1:-1] +
 			acc[1:-1, 0:-2] + acc[1:-1, 2:]
@@ -3064,6 +3106,7 @@ class Genetic:
 			acc[0:-2, 0:-2] + acc[2:, 2:] +
 			acc[2:, 0:-2] + acc[0:-2, 2:]
 		)
+
 		dif_matrix = (1 - (acc_neig_edge + acc_neig_corner * self.corner_factor) * self.delta / (4 + 4 * self.corner_factor))
 		
 		self.acc = acc[1:-1, 1:-1]
