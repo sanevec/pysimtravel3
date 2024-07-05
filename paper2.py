@@ -443,33 +443,27 @@ class Cell:
 		self.exponentialLastT=0
 		self.pollutionLevel=0
 
-	def get_cnnData_value(self, dataType:str = None) -> int:
-		
-		if isinstance(dataType, str):
-			raise "Error, no se ha dado un tipo en el formato correcto."
-		elif dataType == "cars":
-			carTypes = {None: 0, CarType.EV: 1, CarType.Diesel: 2, CarType.Petrol: 3}
-			carType_ = carTypes[self.car]
-		elif dataType == "num_cars":
-			numCars = 0
-			if self.car is not None:
-				numCars += 1
-			if self.cs is not None:
-				numCars += self.cs.carsInCS
-				
-		elif dataType == "buildings":
-			pass
-		elif dataType == "streets":
-			pass
-		elif dataType == "num_cs":
-			pass
-		elif dataType == "car_charge":
-			pass
-		elif dataType == "is_charging":
-			pass
+	def get_cnnData_value(self) -> list:
 
-		else:
-			raise "Error, no se ha dado ningún tipo correcto"
+		# get the type of the car of the cell
+		carTypes = {None: 0, CarType.EV: 1, CarType.Diesel: 2, CarType.Petrol: 3}
+		carType_ = carTypes[self.car]
+
+		# get the number of cars per street
+		numCars = 0
+		if self.car is not None:
+			numCars += 1
+		if self.cs is not None:
+			numCars += self.cs.carsInCS
+		# elif dataType == "buildings":
+		
+		# get if is street/cs or not
+		street_ = self.cell.origin or self.cell.destination or self.cell.cs is not None
+
+		# get the number of chargers for each cs
+		num_cs = self.cell.cs.numberCharging if self.cell.cs is not None else 0
+			
+		return [carType_, numCars, street_, num_cs]
 
 
 	def add_neighbor(self, neighbor):
