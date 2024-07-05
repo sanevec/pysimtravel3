@@ -443,6 +443,35 @@ class Cell:
 		self.exponentialLastT=0
 		self.pollutionLevel=0
 
+	def get_cnnData_value(self, dataType:str = None) -> int:
+		
+		if isinstance(dataType, str):
+			raise "Error, no se ha dado un tipo en el formato correcto."
+		elif dataType == "cars":
+			carTypes = {None: 0, CarType.EV: 1, CarType.Diesel: 2, CarType.Petrol: 3}
+			carType_ = carTypes[self.car]
+		elif dataType == "num_cars":
+			numCars = 0
+			if self.car is not None:
+				numCars += 1
+			if self.cs is not None:
+				numCars += self.cs.carsInCS
+				
+		elif dataType == "buildings":
+			pass
+		elif dataType == "streets":
+			pass
+		elif dataType == "num_cs":
+			pass
+		elif dataType == "car_charge":
+			pass
+		elif dataType == "is_charging":
+			pass
+
+		else:
+			raise "Error, no se ha dado ningún tipo correcto"
+
+
 	def add_neighbor(self, neighbor):
 		self.neighbors.append(neighbor)
 
@@ -2959,7 +2988,7 @@ def experiment(i, numSave=0,run_all=True,view=False,cache=False,indiv=None, cnnE
 					if not os.path.exists(cnnExpDataSave):
 						os.makedirs(cnnExpDataSave)
 					dataName = f"CNNExp_num-{numSave}_seed-{i}"
-					np.save(os.path.join(contaminationExp, dataName), city.grid)
+					np.save(os.path.join(contaminationExp, dataName), city.grid.grid)
 
 				global_fit, local_fit = city.runWithoutPlot(numTimesteps, returnFits, delta, corner_factor, gamma, acc, dif_matrix, wind)
 				return global_fit, local_fit, dataName
@@ -3000,9 +3029,6 @@ def initialize_individual(valid_coordinates, num_chargers, distance, lim_distanc
 	chargers_per_station = [limits[i] - limits[i - 1] for i in range(1, len(limits))]
 	stations = [GChargingStation(some_coordinates[k], chargers_per_station[k]) for k in range(M) if chargers_per_station[k]>0]
 	return Individual(stations)
-
-def generate_n_individual(experiment, numIndiv, valid_coordinates, num_charger, distance, lim_distance):
-	return [(experiment, i, initialize_individual(valid_coordinates=valid_coordinates, num_chargers=num_charger, distance=distance, lim_distance=lim_distance)) for i in range(numIndiv)]
 		
 class GChargingStation:
 	def __init__(self, coordinates: Tuple[int, int], num_chargers: int):
@@ -3565,10 +3591,11 @@ class ContaminationExperiment:
 
 def wrappedGetDataCNN(idxIndv):
 	numExperiment, idxI, individual = idxIndv
-	return experiment(i=numExperiment, indiv=individual, cnnExpDataSave=idxI, returnFits=True, run_all=False, view=False) # Devuelve fit_globa, fit_local, name.
+	cnnExpDataSave = "dataCNN/"#poner fecha
+	return experiment(i=numExperiment, indiv=individual, cnnExpDataSave=cnnExpDataSave, returnFits=True, run_all=False, view=False) # Devuelve fit_globa, fit_local, name.
 	
 
-def getData2CNNExp(args, numExp = 30000, numProcessors = 0) -> None:
+def getData2CNNExp(args, numExp = 10, numProcessors = 0) -> None:
 	"""Función para obtener los datos de entranamiento de la CNN. 
 	Se realizará de forma paralela.
 
@@ -3608,7 +3635,7 @@ def getData2CNNExp(args, numExp = 30000, numProcessors = 0) -> None:
 			opened2={}
 			distancia+=1
 
-	def getIndividuals(numIndiv, numExperiment):
+	def getIndividuals(numExperiment):
 		num_chargers = 72
 		lim_distance = 10
 		p=cartesianExperiment()[numExperiment]
@@ -3621,15 +3648,16 @@ def getData2CNNExp(args, numExp = 30000, numProcessors = 0) -> None:
 			break
 		distance = lambda x,y: aStarDistance(city1.grid.grid[x[1],x[0]],city1.grid.grid[y[1],y[0]])[0]
 		valid_coordinates = city1.listgenerator
-		return generate_n_individual(numExperiment, numIndiv, valid_coordinates=valid_coordinates, num_charger=num_chargers, distance=distance, lim_distance=lim_distance)
+		return initialize_individual(valid_coordinates=valid_coordinates, num_chargers=num_chargers, distance=distance, lim_distance=lim_distance)
 
 	
 	numExperiment = args.run
 	processors = multiprocessing.cpu_count()-1 if numProcessors == 0 else numProcessors
-	inividuals = getIndividuals(numExp, numExperiment)
-
-	with multiprocessing.Pool(processors) as pool:
-		res = pool.map(wrappedGetDataCNN, inividuals) # fitG, fitL, name
+	individuals = [(numExperiment, i, getIndividuals(numExperiment)) for i in range(numExp)]
+	for ind in individuals:
+		wrappedGetDataCNN(ind)
+	# with multiprocessing.Pool(processors) as pool:
+	# 	res = pool.map(wrappedGetDataCNN, individuals) # fitG, fitL, name
 	
 	import pandas as pd
 	res2 = [[name, globalF+(sum(localF)/len(localF))] for globalF, localF, name in res]
