@@ -1,10 +1,12 @@
 from io import StringIO
 import tensorflow as tf
 
-from keras.models import Sequential
-from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization, LeakyReLU, Input
+from keras.models import Sequential, load_model
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization, LeakyReLU, Input, Activation
 from keras.optimizers import Adam
 from keras.regularizers import l2
+
+from sklearn.metrics import r2_score
 
 import pandas as pd
 import json 
@@ -36,10 +38,18 @@ class CNNPysimtravel():
                  epoch:int = 50, learningRate: float = 0.001, batch_size:int = 64, alpha:float = 0.01, 
                  weight_decay:float = 0.0001, l2_value: float = 0.001, 
                  dropout_value_layer: float= 0.2, loss_function:str = "mean_squared_error", isNormalize:bool = False,
-                 model_name:str = "best_model", lr_factor:float=0.5, patience:int=15) -> None:
-        self.__model = Sequential()
+                 model_name:str = "best_model", lr_factor:float=0.5, patience:int=15, modelLoad: str = None, 
+                 modelArchDict: dict =None, nFilters:int = 5) -> None:
+    
+        if modelLoad is not None and isinstance(modelLoad, str):
+            if not os.path.exists(os.path.join(dirModels, modelLoad)):
+                raise "El path no existe o no has subido un nombre existente."
+            self.__model = tf.keras.models.load_model(os.path.join(dirModels, modelLoad))
+            self.isTrained = True
+        else:
+            self.__model = Sequential()
+            self.isTrained = False
         # self.dataShape = dataShape
-        self.isTrained = False
 
         if not os.path.exists(saveOutput):
             print("Creando carpeta de salida en: ", saveOutput)
@@ -62,20 +72,74 @@ class CNNPysimtravel():
         self.lr_factor = lr_factor
         self.patience = patience
 
-        
         self.dirModels = dirModels
-        i = 1
-        _modelName, modelName = model_name,model_name
-        while os.path.exists(os.path.join(dirModels, modelName+'.keras')):
-            modelName = _modelName+'_'+str(i)
-            i+=1
+        if modelLoad is None:
+            i = 1
+            _modelName, modelName = model_name,model_name
+            while os.path.exists(os.path.join(dirModels, modelName+'.keras')):
+                modelName = _modelName+'_'+str(i)
+                i+=1
 
-        _modelName = modelName
-        modelName = os.path.join(dirModels, modelName+'.keras')
-        self.modelName = modelName
-        self._modelName = _modelName
+            _modelName = modelName
+            modelName = os.path.join(dirModels, modelName+'.keras')
+
+
+            self.modelName = modelName
+            self._modelName = _modelName
+        else:
+            self.modelName = os.path.join(dirModels, modelLoad)
+            self._modelName = modelLoad.split('.')[0]
 
         self.isNormalize = isNormalize
+
+        if modelArchDict is None:
+            self.modelArch = {
+                                "convL": 
+                                {
+                                    "nLayers": 2,
+                                    "activationL": "LeakyReLU",
+                                    "sFilter": 3
+                                },
+                                "convL": 
+                                {
+                                    "nLayers": 2,
+                                    "activationL": "LeakyReLU",
+                                    "sFilter": 3
+                                },
+                                "convL": 
+                                {
+                                    "nLayers": 2,
+                                    "activationL": "LeakyReLU",
+                                    "sFilter": 3
+                                },
+                                "convL": 
+                                {
+                                    "nLayers": 2,
+                                    "activationL": "LeakyReLU",
+                                    "sFilter": 5
+                                },
+                                "convL": 
+                                {
+                                    "nLayers": 2,
+                                    "activationL": "LeakyReLU",
+                                    "sFilter": 5
+                                },
+                                "convL": 
+                                {
+                                    "nLayers": 1,
+                                    "activationL": "LeakyReLU",
+                                    "sFilter": 5
+                                },
+                                "denseL":
+                                {
+                                    "nLayers": 4,
+                                    "activationL": "LeakyReLU",
+                                }
+                            }
+            self.nFilters = nFilters
+        else:
+            self.modelArch = modelArchDict
+            self.nFilters = nFilters
 
     @property
     def model(self):
@@ -91,9 +155,12 @@ class CNNPysimtravel():
 
     def makeModel(self) -> None:
 
+        if self.isTrained:
+            return self.model
+
         model = self.__model
 
-        inputShpae = self.dataShape
+        inputShape = self.dataShape
 
         dtype = 'float32'
         alpha = self.alpha
@@ -102,76 +169,14 @@ class CNNPysimtravel():
         learningRate = self.learningRate
         loss_function = self.loss_function
         dropout_value_layer = self.dropout_value_layer
+        nFilters = self.nFilters
 
         # Init layer
-        model.add(Input(shape=inputShpae))
+        model.add(Input(shape=inputShape))
 
-        # First convolutional layer fase X1 (3,3)
-        nLayers = 5 # use later 2**nLayers to calculate the number of filters.
-        for _ in range(2):
-            model.add(Conv2D(2**nLayers, (3,3), padding='same', dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(BatchNormalization())
-        model.add(MaxPooling2D(strides=(2,2), dtype=dtype)) # reduce dimensionality
-        model.add(Dropout(dropout_value_layer))
-        nLayers+=1
+        model = self.makeArchModel(model=model, layers=self.modelArch, dtype=dtype, alpha=alpha, l2_value=l2_value, weight_decay=weight_decay, learningRate=learningRate,
+        dropout_value_layer=dropout_value_layer, nFilters=nFilters)
         
-        # Second convolutional layers fase X3 (3,3)
-        for _ in range(2):
-            model.add(Conv2D(2**nLayers, (3,3), padding='same', dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(BatchNormalization())
-        model.add(MaxPooling2D(strides=(2,2), dtype=dtype)) # reduce dimensionality
-        model.add(Dropout(dropout_value_layer))
-        nLayers+=1
-
-        # Third convolutional layers fase x2 (3,3)
-        for _ in range(2):
-            model.add(Conv2D(2**nLayers, (3,3), padding='same', dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(BatchNormalization())
-        model.add(MaxPooling2D(strides=(2,2), dtype=dtype)) # reduce dimensionality
-        model.add(Dropout(dropout_value_layer))
-        nLayers+=1
-
-        # Fourd convolutional layers fase x2 (5,5)
-        for _ in range(2):
-            model.add(Conv2D(2**nLayers, (5,5), padding='same', dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(BatchNormalization())
-        model.add(MaxPooling2D(strides=(2,2), dtype=dtype)) # reduce dimensionality
-        model.add(Dropout(dropout_value_layer))
-
-        for _ in range(2):
-            model.add(Conv2D(2**nLayers, (5,5), padding='same', dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(BatchNormalization())
-        model.add(MaxPooling2D(strides=(2,2), dtype=dtype)) # reduce dimensionality
-        model.add(Dropout(dropout_value_layer))
-        nLayers+=1
-        
-        for _ in range(1):
-            model.add(Conv2D(2**nLayers, (5,5), padding='same', dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(BatchNormalization())
-        model.add(MaxPooling2D(strides=(2,2), dtype=dtype)) # reduce dimensionality
-        model.add(Dropout(dropout_value_layer))
-        nLayers+=1
-        
-        # Flat the l4_output
-        model.add(Flatten(dtype=dtype))
-
-        # Dense layers fase x3
-        _neurons = 2**nLayers
-        for i in range(4):
-            reducedValue = 2**i
-            neurons = _neurons/reducedValue
-            model.add(Dense(neurons, dtype=dtype))
-            model.add(LeakyReLU(alpha=alpha))
-            model.add(Dropout(.5, dtype=dtype))
-        # output layer
-        model.add(Dense(1, activation='linear', dtype=dtype)) # linear to get the regresion
-
         optimizer = Adam(learning_rate=learningRate, decay=weight_decay)
         model.compile(optimizer=optimizer, loss=loss_function, metrics=['mean_absolute_error'])
 
@@ -198,14 +203,22 @@ class CNNPysimtravel():
                     "lr_factor" : self.lr_factor,
                     "patience" : self.patience
                 }
-        data = {
+        new_data = {
             self._modelName : {
                 "hyp_params" : hyp_params,
                 "summaryModel":self.getStrSummaryModel()
             }
         }
-        with open(fileToSave, 'a') as j:
-            json.dumb(data, j, ident=4)
+
+        if os.path.getsize(fileToSave) > 0:
+            with open(fileToSave, 'r') as config:
+                data = json.load(config)
+        else:
+            data = {}
+
+        with open(fileToSave, 'w') as config:
+            data.update(new_data)
+            json.dump(data, config, indent=4)
 
     def saveTextModel(self, fileToSave="C:\\Users\josem\\Jose\\Sanevec\\pysimtravel3\\models\\configurations.txt"):
         with open(fileToSave, 'a') as f:
@@ -226,6 +239,13 @@ class CNNPysimtravel():
         print("Datos finalizados")
     
     def train(self) -> None:
+
+        if self.isTrained:
+            if self.history is None:
+                print("The model is loaded and not have history.")
+            print("The model is already trained")
+            return
+
         model = self.__model
         # Only save the best model
 
@@ -236,7 +256,7 @@ class CNNPysimtravel():
 
         train_data = self.train_dataset
         val_dataset = self.val_dataset
-
+        model.summary()
         history = model.fit(
             train_data,
             epochs = self.epoch,
@@ -283,6 +303,9 @@ class CNNPysimtravel():
     
     def showGraphicTrain(self):
         history = self.history
+        if history is None:
+            raise "The model is loaded and not has history."
+
         sns.set(style="whitegrid")
 
         # Obtener datos del historial
@@ -328,18 +351,34 @@ class CNNPysimtravel():
         plt.show()
 
     def showGraphicTest(self, modelPath = None):
-
+        # modelPath is actually a name of the model, and use then the direction of the model.
         if modelPath is None:
             modelPath = self.modelName # use the best model trained
+        elif not os.path.exists(os.path.join(self.dirModels, modelPath)):
+            print("Error, modelo no existente: ", modelPath)
+            return
 
-        model = tf.keras.models.load_model(modelPath)
+
+        model = tf.keras.models.load_model(os.path.join(self.dirModels, modelPath))
         yPredict = abs(model.predict(self.test_dataset).flatten())
         yReal = []
         for batch in self.test_dataset:
+            print(batch)
             yReal.extend(abs(batch[1].numpy()))
         yReal = np.array(yReal).flatten()
 
-        print(yPredict, " - ", yReal)
+        print(len(yPredict), " - ", len(yReal))
+        assert len(yPredict) == len(yReal), f"Error, no tienen el mismo tamaño {len(yPredict)} - {len(yReal)}"
+        r2Score = r2_score(yReal, yPredict)
+
+        coefficients = np.polyfit(yReal, yPredict, 1)
+        slope, intercept = coefficients
+
+        def regression_line(x):
+            return slope * x + intercept
+
+        x_vals = np.linspace(min(yReal), max(yReal), 100)
+        y_vals = regression_line(x_vals)
         
         plt.figure(figsize=(10,10))
         sns.scatterplot(x=yPredict, y=yReal)
@@ -347,7 +386,9 @@ class CNNPysimtravel():
         min_val= min([*yPredict, *yReal, 0])
         max_val= max([*yPredict, *yReal])
 
-        plt.plot([min_val, max_val], [min_val, max_val], label="Reacta ideal")
+        plt.plot([min_val, max_val], [min_val, max_val], label="Recta ideal")
+        plt.plot(y_vals, x_vals, label="Predict2Real Regression line")
+
 
         plt.axis('equal')
         plt.xlim(min_val, max_val)
@@ -355,10 +396,12 @@ class CNNPysimtravel():
 
         plt.xlabel("Valor predicho")
         plt.ylabel("Valor real")
-        plt.title("Comparación real vs predicción")
+        plt.title(f"Comparación real vs predicción\nR2 = {r2Score}")
 
         plt.legend()
-        self.saveImage(f"{self._modelName}_graphicTest", self.dirModels, plt)
+        if "." in modelPath:
+            modelPath = modelPath.split(".")[0]
+        self.saveImage(f"{modelPath}_graphicTest", self.dirModels, plt)
         plt.show()
     
     def normalizeLabels(self, xValues, yValues):
@@ -371,6 +414,86 @@ class CNNPysimtravel():
             os.makedirs(outputdir)
         filename=os.path.join(outputdir, name)
         image.savefig(filename)
+
+    @staticmethod
+    def makeArchModel(model, layers:dict, dtype:str, alpha:float, l2_value:float, weight_decay:float, learningRate:float, 
+    dropout_value_layer:float, nFilters:int=5):
+        '''
+        layer form:
+            {
+                typeLayer:{
+                    args
+                }
+            }
+
+        example:
+            {
+                convL:
+                    {
+                        nLayers: 3,
+                        activationL:LeakyReLU(alpha=alpha),
+                        sFilter: 3
+                    },
+                denseL:
+                    {
+                        nLayers: 4,
+                        activationL: LeakyReLU(alpha=alpha),
+                    }
+            }
+        '''
+        def denseL(model,nLayers, _neurons, activationL):
+            for i in range(nLayers):
+                reducedValue = 2**i
+                neurons = _neurons/reducedValue
+                model.add(Dense(neurons, dtype=dtype))
+                if isinstance(activationL, str):
+                    model.add(Activation(activationL))
+                else:
+                    model.add(activationL)
+                model.add(Dropout(.5, dtype=dtype))
+            return model
+        
+        def convL(model, nLayers, nFilters, sFilter, activationL, padding="same", isNorm=True, stride=2):
+            # First convolutional layer fase X1 (3,3)
+            for i in range(nLayers):
+                print("CNN layer: ", i)
+                model.add(Conv2D(nFilters, (sFilter,sFilter), padding=padding, dtype=dtype)) # l1_output_shape = (dataS[0], dataS[1], 32)
+                
+                if isinstance(activationL, str):
+                    if activationL=="LeakyReLU":
+                        model.add(LeakyReLU(alpha=alpha))
+                    else:
+                        model.add(Activation(activationL))
+                else:
+                    model.add(activationL)
+                
+                if isNorm:
+                    model.add(BatchNormalization())
+            model.add(MaxPooling2D(strides=(stride,stride), dtype=dtype)) # reduce dimensionality
+            model.add(Dropout(dropout_value_layer))
+            return model 
+
+        _model = model
+        for typeL, args in layers.items():
+            
+            _nFilters = 2**nFilters
+
+            if typeL.split("_")[0]=="denseL":
+                # print("Add dense layers")
+                _model=denseL(_model, _neurons=_nFilters, **args)
+            elif typeL.split("_")[0]=="convL":
+                # print("Add conv layers")
+                _model=convL(_model,nFilters=_nFilters, **args)
+
+            else:
+                raise f"Error, no existe el tipo de layer que especificas: {typeL}.\nLayers permitidas: denseL, convL."
+            nFilters+=1
+        
+        # output layer
+        _model.add(Dense(1, activation='linear', dtype=dtype)) # linear to get the regresion
+
+        model = _model
+        return model
 
 def penaltyLowVar(y_true, y_pred, lambda_var=1.0):
     mse = tf.reduce_mean(tf.square(y_true - y_pred))
